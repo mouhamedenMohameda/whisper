@@ -1,0 +1,12 @@
+backend/.env
+backend/data/
+backend/__pycache__/
+backend/.venv/
+frontend/node_modules/
+frontend/dist/
+.DS_Store
+
+*.mp4
+*.m4a
+*.mp3
+*.wav

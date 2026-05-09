@@ -1,0 +1,444 @@
+import { useEffect, useRef, useState } from "react";
+import { ENGINE_COURSE, ENGINE_TRANSCRIPTION } from "../branding.js";
+
+/** Extensions audio uniquement (pas vidéo PDF image). */
+const AUDIO_EXTENSIONS = new Set([
+  ".mp3",
+  ".wav",
+  ".m4a",
+  ".mp4",
+  ".m4b",
+  ".ogg",
+  ".oga",
+  ".opus",
+  ".flac",
+  ".aac",
+  ".caf",
+  ".aiff",
+  ".aif",
+  ".wma",
+  ".amr",
+]);
+const ACCEPT = Array.from(AUDIO_EXTENSIONS).join(",");
+const AUDIO_EXTENSIONS_LABEL = Array.from(AUDIO_EXTENSIONS)
+  .map((e) => e.slice(1).toUpperCase())
+  .sort()
+  .join(", ");
+
+/** Limite côté navigateur pour l’estimation durée ; le serveur impose sa propre durée max (TRANSCRIBE_MAX_DURATION_SECONDS). */
+const MAX_AUDIO_SECONDS = 2 * 3600;
+
+function audioExtension(name) {
+  if (!name || typeof name !== "string") return "";
+  const i = name.lastIndexOf(".");
+  return i >= 0 ? name.slice(i).toLowerCase() : "";
+}
+
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function formatDur(sec) {
+  if (!sec || !Number.isFinite(sec) || sec <= 0) return "—";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function useEstimatedDurations(files) {
+  const [map, setMap] = useState({});
+  const started = useRef(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    const wanted = new Set(files.map((f) => `${f.name}-${f.size}`));
+
+    for (const key of [...started.current]) {
+      if (!wanted.has(key)) started.current.delete(key);
+    }
+
+    setMap((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        if (!wanted.has(k)) delete next[k];
+      }
+      return next;
+    });
+
+    for (const f of files) {
+      const key = `${f.name}-${f.size}`;
+      if (started.current.has(key)) continue;
+      started.current.add(key);
+
+      const url = URL.createObjectURL(f);
+      const audio = new Audio();
+      audio.preload = "metadata";
+      audio.src = url;
+
+      const cleanupUrl = () => URL.revokeObjectURL(url);
+
+      const onMeta = () => {
+        if (cancelled) return;
+        const d = audio.duration;
+        setMap((p) => ({
+          ...p,
+          [key]: Number.isFinite(d) ? d : null,
+        }));
+        cleanupUrl();
+      };
+      const onErr = () => {
+        if (cancelled) return;
+        setMap((p) => ({ ...p, [key]: null }));
+        cleanupUrl();
+      };
+
+      audio.addEventListener("loadedmetadata", onMeta, { once: true });
+      audio.addEventListener("error", onErr, { once: true });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [files]);
+
+  return map;
+}
+
+export default function UploadZone({
+  files,
+  onFilesChange,
+  subject,
+  onSubjectChange,
+  speechLanguage = "fr",
+  onSpeechLanguageChange,
+  onSubmit,
+  disabled,
+  batchProgress,
+}) {
+  const durations = useEstimatedDurations(files);
+  const [drag, setDrag] = useState(false);
+
+  useEffect(() => {
+    if (files.length === 0 || disabled) return;
+    const namesTooLong = [];
+    const next = [];
+    for (const f of files) {
+      const key = `${f.name}-${f.size}`;
+      const raw = durations[key];
+      const sec = typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+      if (sec != null && sec > MAX_AUDIO_SECONDS) namesTooLong.push(f.name);
+      else next.push(f);
+    }
+    if (namesTooLong.length === 0) return;
+    const label =
+      namesTooLong.length <= 2 ? namesTooLong.map((n) => n.slice(0, 64)).join(", ") : `${namesTooLong.length} fichier(s)`;
+    window.dispatchEvent(
+      new CustomEvent("lecturai-toast", {
+        detail: {
+          msg: `${label} : durée trop longue (max ${MAX_AUDIO_SECONDS / 3600} h). Fichiers retirés.`,
+          type: "error",
+        },
+      }),
+    );
+    onFilesChange(next);
+  }, [files, durations, disabled, onFilesChange]);
+
+  const addFiles = (list) => {
+    const arr = Array.from(list || []);
+    const accepted = [];
+    const rejected = [];
+    for (const f of arr) {
+      if (AUDIO_EXTENSIONS.has(audioExtension(f.name))) accepted.push(f);
+      else rejected.push(f.name || "(fichier sans nom)");
+    }
+    if (rejected.length) {
+      const sample =
+        rejected.length <= 2 ? rejected.join(", ") : `${rejected.length} fichier(s) (ex. ${rejected[0].slice(0, 48)}…)`;
+      window.dispatchEvent(
+        new CustomEvent("lecturai-toast", {
+          detail: {
+            msg: `${sample} — seuls les fichiers audio sont acceptés (${AUDIO_EXTENSIONS_LABEL}). Pas de PDF, image ou vidéo.`,
+            type: "error",
+          },
+        }),
+      );
+    }
+    if (accepted.length) onFilesChange([...files, ...accepted]);
+  };
+
+  const removeAt = (i) => {
+    const copy = [...files];
+    copy.splice(i, 1);
+    onFilesChange(copy);
+  };
+
+  const pctOverall = batchProgress?.overallPct ?? 0;
+
+  return (
+    <div className="mx-auto w-full max-w-6xl space-y-6 pb-8 safe-pad-b sm:space-y-10 sm:pb-6 lg:pb-6">
+      {/*
+        Mobile : importer d’abord (ordre visual), halo marketing ensuite — évite vide au scroll + zone réglages plus haut à l’écran.
+      */}
+      <div className="flex flex-col gap-6 lg:grid lg:grid-cols-12 lg:gap-14 xl:gap-16">
+        <header className="order-2 space-y-3 text-center sm:space-y-4 lg:order-none lg:col-span-5 lg:text-left xl:col-span-4 lg:sticky lg:top-[6.75rem] lg:self-start">
+          <div className="inline-flex rounded-full bg-gradient-to-r from-brand-500/15 via-violet-500/15 to-cyan-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.26em] text-brand-900 shadow-sm shadow-brand-500/10 dark:text-brand-100 dark:shadow-none sm:px-3.5 sm:py-1.5 sm:tracking-[0.28em]">
+            {ENGINE_TRANSCRIPTION} × {ENGINE_COURSE}
+          </div>
+          <h1 className="font-display text-[clamp(1.45rem,5.5vw+0.65rem,2.875rem)] font-extrabold leading-[1.12] tracking-tight text-slate-900 dark:text-white sm:text-fluid-hero sm:leading-[1.1]">
+            Ton cours commence{" "}
+            <span className="text-gradient-brand">avec un fichier audio</span>
+          </h1>
+          <p className="mx-auto max-w-lg text-sm leading-relaxed text-slate-600 dark:text-slate-400 sm:text-[15px] sm:leading-[1.65] lg:mx-0 lg:max-w-none lg:text-[0.9625rem]">
+            Importe un enregistrement : nous le transcrivons avec{" "}
+            <span className="font-semibold text-slate-800 dark:text-slate-100">{ENGINE_TRANSCRIPTION}</span>, puis nous transformons le texte
+            en cours clair avec <span className="font-semibold text-slate-800 dark:text-slate-100">{ENGINE_COURSE}</span>.
+          </p>
+          <ul className="mx-auto mt-4 flex snap-x snap-mandatory gap-2.5 overflow-x-auto pb-1 text-left text-[12.5px] text-slate-600 dark:text-slate-400 [-ms-overflow-style:none] [scrollbar-width:none] sm:mt-5 sm:grid sm:snap-none sm:grid-cols-1 sm:gap-2.5 sm:overflow-visible lg:mx-0 lg:mt-6 xl:gap-4 [&::-webkit-scrollbar]:hidden">
+            <li className="flex min-w-[min(100%,18.5rem)] shrink-0 snap-start gap-2.5 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/90 px-3 py-2.5 shadow-sm dark:border-slate-700/80 dark:from-slate-900/90 dark:to-slate-950/80 sm:min-w-0 sm:gap-3 sm:from-white/40 sm:to-transparent sm:dark:from-slate-900/40">
+              <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg bg-brand-500/15 text-[11px]" aria-hidden>1</span>
+              <span>
+                Fichiers <strong>volumineux acceptés</strong> : le serveur découpe automatiquement pour l’API Whisper (~25&nbsp;Mo par segment). Jusqu’à{" "}
+                <strong>{MAX_AUDIO_SECONDS / 3600}&nbsp;h</strong> par fichier (limite durée côté serveur) · plusieurs fichiers d’affilée OK.
+              </span>
+            </li>
+            <li className="flex min-w-[min(100%,18.5rem)] shrink-0 snap-start gap-2.5 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white to-violet-50/50 px-3 py-2.5 shadow-sm dark:border-slate-700/80 dark:from-slate-900/90 dark:to-violet-950/25 sm:min-w-0 sm:gap-3 sm:from-white/40 sm:to-transparent sm:dark:from-slate-900/40">
+              <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-[11px]" aria-hidden>2</span>
+              <span>L’étape suivante te permet de <strong>corriger le transcript</strong> avant de générer le cours.</span>
+            </li>
+          </ul>
+        </header>
+
+        <div className="order-1 min-w-0 space-y-5 sm:space-y-8 lg:order-none lg:col-span-7 xl:col-span-8">
+          <div
+        role="presentation"
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDrag(true);
+        }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDrag(false);
+          addFiles(e.dataTransfer.files);
+        }}
+        className={`group relative isolate overflow-hidden rounded-2xl border-2 border-dashed px-4 py-9 text-center transition-all duration-300 sm:rounded-[2rem] sm:px-8 sm:py-14 lg:rounded-[2.1rem]
+          ${
+            drag
+              ? "scale-[1.01] border-brand-500 bg-gradient-to-br from-brand-500/15 via-brand-400/10 to-violet-500/15 shadow-[0_0_0_3px_rgb(124_58_237/0.2),0_32px_64px_-24px_rgb(79_70_229/0.55)] motion-reduce:scale-100 dark:border-brand-400"
+              : "border-slate-300/95 bg-gradient-to-b from-white via-white to-slate-50/90 ring-gradient-brand hover-lift motion-reduce:transform-none motion-reduce:shadow-none dark:border-slate-600 dark:from-slate-900/95 dark:via-slate-900 dark:to-slate-950/90"
+          }
+        `}
+      >
+        <div
+          className={`pointer-events-none absolute inset-[2px] rounded-[calc(1.75rem-2px)] transition-opacity duration-500 sm:rounded-[calc(2rem-2px)] lg:rounded-[calc(2.1rem-2px)] motion-reduce:transition-none ${
+            drag
+              ? "bg-gradient-to-br from-brand-500/20 via-transparent to-violet-500/25 opacity-100"
+              : "bg-gradient-to-br from-brand-500/[0.08] via-transparent to-violet-600/[0.09] opacity-0 group-hover:opacity-100 motion-reduce:opacity-70 dark:from-brand-400/15 dark:to-violet-600/18"
+          }`}
+          aria-hidden
+        />
+        <div className="pointer-events-none absolute left-10 right-10 top-[18%] h-px bg-gradient-to-r from-transparent via-brand-400/35 to-transparent opacity-75 dark:via-brand-300/35" aria-hidden />
+        <input
+          aria-label="Importer des fichiers audio"
+          type="file"
+          accept={ACCEPT}
+          multiple
+          disabled={disabled}
+          className="absolute inset-0 z-10 cursor-pointer opacity-0 disabled:cursor-not-allowed"
+          onChange={(e) => addFiles(e.target.files)}
+        />
+        <div className="pointer-events-none relative z-[1] space-y-4">
+          <div className="relative mx-auto flex h-[4.1rem] w-[4.1rem] items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500/20 to-violet-500/25 text-[1.85rem] shadow-inner shadow-brand-500/10 transition-transform duration-500 group-hover:scale-105 motion-reduce:transform-none dark:from-brand-500/25 dark:to-violet-600/35 dark:shadow-brand-900/30 sm:h-[4.75rem] sm:w-[4.75rem] sm:text-[2.05rem]">
+            <span className="drop-shadow-sm" aria-hidden>
+              🎙️
+            </span>
+            <span className="pointer-events-none absolute inset-[-4px] hidden rounded-[1rem] bg-brand-400/25 opacity-70 blur-xl motion-safe:animate-breathe dark:bg-brand-600/25 lg:block" aria-hidden />
+          </div>
+          <h2 className="font-display text-lg font-bold tracking-tight text-slate-900 dark:text-white sm:text-[1.35rem]">
+            Glisse-dépose ou touche pour parcourir
+          </h2>
+          <p className="text-[13px] leading-snug text-slate-500 dark:text-slate-400 sm:text-sm sm:text-[0.948rem]">
+            {AUDIO_EXTENSIONS_LABEL} — <strong>audio uniquement</strong> · <strong>taille libre</strong> (découpage serveur pour Whisper) · jusqu’à{" "}
+            <strong>{MAX_AUDIO_SECONDS / 3600}&nbsp;h</strong> par fichier · plusieurs fichiers autorisés
+          </p>
+          <div className="flex flex-wrap justify-center gap-1.5 pt-1 sm:gap-2">
+            {AUDIO_EXTENSIONS_LABEL.split(", ").map((t) => (
+              <span
+                key={t}
+                className="rounded-full border border-slate-200/90 bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-600 shadow-sm dark:border-slate-600 dark:bg-slate-900/90 dark:text-slate-300 sm:bg-white/90 sm:px-3 sm:py-1 sm:text-[11px]"
+              >
+                {t}
+              </span>
+            ))}
+          </div>
+        </div>
+          </div>
+
+      {files.length > 0 && (
+        <ul className="space-y-3">
+          {files.map((f, i) => {
+            const key = `${f.name}-${f.size}`;
+            const d = durations[key];
+            const filePct = batchProgress?.perFile?.[i] ?? 0;
+
+            return (
+              <li
+                key={key}
+                className="glass-panel flex items-center gap-3 rounded-2xl p-4 shadow-sm"
+              >
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-500/10 text-xl dark:bg-brand-500/15">
+                  🎵
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{f.name}</div>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    <span>{formatBytes(f.size)}</span>
+                    <span className="text-slate-400">•</span>
+                    <span>Est. durée {formatDur(d)}</span>
+                    {disabled && (
+                      <>
+                        <span className="text-slate-400">•</span>
+                        <span className="font-medium text-brand-600 dark:text-brand-400">
+                          Envoi {Math.round(filePct * 100)}%
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  {disabled && (
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-brand-600 to-violet-500 transition-[width]"
+                        style={{ width: `${Math.round(filePct * 100)}%` }}
+                      />
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  className="shrink-0 rounded-xl px-3 py-2 text-[11px] font-semibold text-slate-500 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40 dark:hover:bg-rose-950/40 dark:hover:text-rose-300"
+                  onClick={() => removeAt(i)}
+                >
+                  Retirer
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {disabled && files.length > 0 && (
+        <div className="space-y-1">
+          <div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-brand-600 to-violet-500 transition-[width]"
+              style={{ width: `${Math.round(pctOverall * 100)}%` }}
+            />
+          </div>
+          <p className="text-center text-[11px] text-slate-500">
+            Progression globale du lot · {Math.round(pctOverall * 100)}%
+          </p>
+        </div>
+      )}
+
+          <div className="glass-panel relative space-y-4 overflow-hidden rounded-3xl border border-white/65 p-4 pt-5 shadow-soft sm:p-5 sm:pt-5 lg:p-6 dark:border-slate-700/80">
+        <div
+          className="pointer-events-none absolute inset-x-6 top-0 h-1 rounded-full bg-gradient-to-r from-brand-500 via-violet-500 to-cyan-500 opacity-[0.92] lg:hidden"
+          aria-hidden
+        />
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-bold text-slate-800 dark:text-slate-200">Langue du cours (pour la transcription)</legend>
+          <p className="text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+            Par défaut : <strong className="text-slate-700 dark:text-slate-300">français</strong>. À basculer en arabe si le cours oral est principal en arabe. Pas de mode « auto ».
+          </p>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Langue de transcription">
+            {[
+              { id: "fr", label: "Français" },
+              { id: "ar", label: "Arabe" },
+            ].map((opt) => (
+              <label
+                key={opt.id}
+                className={`flex cursor-pointer items-center gap-2 rounded-2xl border px-4 py-2.5 text-xs font-bold transition sm:text-sm ${
+                  speechLanguage === opt.id
+                    ? "border-brand-500 bg-brand-500/10 text-brand-900 shadow-inner dark:border-brand-400 dark:bg-brand-950/45 dark:text-brand-100"
+                    : "border-slate-200/90 bg-white/70 text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-950/60 dark:text-slate-200"
+                }`}
+              >
+                <input
+                  type="radio"
+                  className="sr-only"
+                  name="speech-language"
+                  checked={speechLanguage === opt.id}
+                  disabled={disabled}
+                  onChange={() => typeof onSpeechLanguageChange === "function" && onSpeechLanguageChange(/** @type {"fr"|"ar"} */ (opt.id))}
+                  value={opt.id}
+                />
+                {opt.label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
+        <label className="flex flex-col gap-1.5 text-sm font-bold text-slate-800 dark:text-slate-200 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+          Matière / thème du cours
+          <span className="rounded-full bg-slate-900/[0.04] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:bg-white/[0.06] dark:text-slate-400">
+            optionnel précis recommandé
+          </span>
+        </label>
+        <input
+          value={subject}
+          onChange={(e) => onSubjectChange(e.target.value)}
+          placeholder="Biologie cellulaire, Droit constitutionnel, Algèbre linéaire…"
+          className="w-full rounded-2xl border border-slate-200/95 bg-white/90 px-4 py-3.5 text-sm outline-none shadow-inner shadow-slate-900/[0.02] ring-transparent transition-[border-color,box-shadow] focus:border-brand-500 focus:ring-[3px] focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-950/85 dark:focus:border-brand-400 dark:focus:ring-brand-400/20"
+          disabled={disabled}
+        />
+        <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+          Plus le thème est clair, plus {ENGINE_COURSE} adapte le niveau et les exemples.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-6">
+        <button
+          type="button"
+          disabled={disabled || files.length === 0}
+          onClick={onSubmit}
+          className="inline-flex min-h-[3rem] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-brand-600 via-brand-500 to-violet-600 px-6 py-3.5 text-sm font-bold text-white shadow-[0_22px_50px_-26px_rgb(79_70_229/0.65)] shadow-glow transition hover:brightness-[1.06] active:translate-y-[0.5px] disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-400 disabled:text-slate-600 disabled:shadow-none disabled:active:translate-y-0 motion-reduce:hover:brightness-100 dark:disabled:from-slate-700 dark:disabled:to-slate-700 dark:disabled:text-slate-400 sm:min-h-[3.125rem] sm:w-auto sm:min-w-[14rem] sm:px-7"
+        >
+          {disabled && (
+            <span className="inline-block size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+          )}
+          Transcrire {files.length > 1 ? `${files.length} fichiers` : "l'enregistrement"}
+        </button>
+
+        <aside
+          role="note"
+          aria-label="Informations sur la précision de la transcription"
+          className="w-full shrink-0 rounded-2xl border border-amber-200/85 bg-gradient-to-br from-amber-50 via-white/90 to-orange-50/50 p-3.5 text-left shadow-md shadow-amber-900/10 dark:border-amber-900/55 dark:from-amber-950/40 dark:via-slate-950/92 dark:to-amber-950/20 sm:max-w-md sm:p-4 lg:max-w-[22rem]"
+        >
+          <div className="flex gap-3 sm:gap-3.5">
+            <span className="select-none shrink-0 text-xl leading-none text-amber-600 dark:text-amber-400" aria-hidden>
+              ℹ️
+            </span>
+            <div className="min-w-0 space-y-2 text-[11.6px] leading-relaxed text-slate-700 dark:text-slate-300 sm:text-[12px]">
+              <p className="font-semibold text-slate-900 dark:text-white">Transcription par IA ({ENGINE_TRANSCRIPTION})</p>
+              <p>
+                Le texte généré n’est pas garanti comme parfaitement exact : erreurs possibles sur les noms propres, le jargon,
+                les chiffres ou la ponctuation. Ce n’est pas une source officielle ou un substitut à un avis professionnel — il
+                s’agit d’un outil pour t’aider à réviser.
+              </p>
+              <p>
+                Tu pourras <strong className="font-semibold text-slate-900 dark:text-slate-100">corriger le transcript à l&apos;étape suivante</strong>{" "}
+                avant de faire générer le cours avec {ENGINE_COURSE}. Les modèles et le produit évoluent : les résultats
+                s&apos;amélioreront encore avec le temps.
+              </p>
+            </div>
+          </div>
+        </aside>
+      </div>
+      </div>
+    </div>
+    </div>
+  );
+}

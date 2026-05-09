@@ -1,0 +1,31 @@
+"""Coûts en crédits (entiers) débités après succès API — surchargeables par variables d'environnement."""
+
+from __future__ import annotations
+
+import os
+
+
+def credits_transcribe() -> int:
+    """Débit fixe désactivé : le débit suit le coût API en MRU (voir routes transcribe/export). Conservé pour compat refs."""
+    return max(0, int(os.getenv("CREDITS_DEBIT_TRANSCRIBE", "0")))
+
+
+def credits_generate() -> int:
+    return max(0, int(os.getenv("CREDITS_DEBIT_GENERATE", "0")))
+
+
+def credits_export() -> int:
+    return max(0, int(os.getenv("CREDITS_DEBIT_EXPORT", "0")))
+
+
+def registration_bonus_credits() -> int:
+    """Bonus d'inscription en unités portefeuille (MRU micro). Défaut 0 : aucun montant gratuit."""
+    return max(0, int(os.getenv("CREDITS_REGISTRATION_BONUS", "0")))
+
+
+def registration_validity_days() -> int:
+    return max(1, int(os.getenv("CREDITS_REGISTRATION_VALIDITY_DAYS", "365")))
+
+
+def topup_approve_extend_days_default() -> int:
+    return max(1, int(os.getenv("CREDITS_TOPUP_APPROVE_EXTEND_DAYS", "90")))

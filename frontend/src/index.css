@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply antialiased;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply min-h-[100dvh] text-slate-900 dark:text-slate-50;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    @apply bg-brand-500/25 text-slate-900 dark:bg-brand-400/30 dark:text-white;
+  }
+
+  .safe-pad-x {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+  }
+
+  .safe-pad-b {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply border border-white/70 bg-white/75 shadow-lg shadow-slate-900/[0.04] backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-900/75 dark:shadow-black/30;
+  }
+
+  .glass-header {
+    @apply border border-white/80 bg-white/70 shadow-soft-lg backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/65 dark:shadow-black/35;
+  }
+
+  /* Fond léger façon grille (premium, discret). */
+  .bg-dot-grid {
+    background-image: radial-gradient(circle at 1px 1px, rgb(15 23 42 / 0.06) 1px, transparent 0);
+    background-size: 28px 28px;
+  }
+
+  .dark .bg-dot-grid {
+    background-image: radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.05) 1px, transparent 0);
+  }
+
+  /* Anneau gradient pour cartes hero / dropzones. */
+  .ring-gradient-brand {
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.55),
+      0 0 0 1px rgb(99 102 241 / 0.09),
+      0 28px 64px -32px rgb(79 70 229 / 0.22),
+      0 12px 32px -20px rgb(17 24 39 / 0.12);
+  }
+
+  .dark .ring-gradient-brand {
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.05),
+      0 0 0 1px rgb(129 140 248 / 0.12),
+      0 28px 64px -32px rgb(0 0 0 / 0.55),
+      0 12px 32px -20px rgb(67 56 202 / 0.15);
+  }
+
+  .text-gradient-brand {
+    @apply bg-gradient-to-r from-brand-600 via-violet-600 to-cyan-600 bg-clip-text text-transparent dark:from-brand-400 dark:via-violet-400 dark:to-cyan-400;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .motion-safe\:hover-lift:hover {
+      transform: none;
+    }
+    .motion-reduce-hide {
+      animation: none !important;
+    }
+  }
+
+  .hover-lift {
+    @apply transition-[transform,box-shadow] duration-300 ease-out;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .hover-lift:hover {
+      transform: translateY(-2px);
+      @apply shadow-soft-lg;
+    }
+  }
+
+  /* Typo fluide titres landing. */
+  .text-fluid-hero {
+    font-size: clamp(1.65rem, 4.2vw + 0.85rem, 2.875rem);
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+  }
+
+  /** Mobile Safari : backdrop-blur + gros dégradés coûtent cher et retardent la peinture du bas de page. */
+  @media (max-width: 1023px) {
+    .glass-panel {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      @apply bg-white/[0.94] shadow-soft dark:bg-slate-900/[0.94];
+    }
+
+    .glass-header {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      @apply bg-white/[0.97] shadow-soft-lg dark:bg-slate-950/[0.97];
+    }
+  }
+}
