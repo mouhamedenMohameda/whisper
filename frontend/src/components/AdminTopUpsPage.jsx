@@ -297,9 +297,9 @@ export default function AdminTopUpsPage({ onBack }) {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-10 pb-24">
-      <div className="flex flex-wrap items-start justify-between gap-5">
-        <div className="min-w-[12rem]">
+    <div className="mx-auto w-full min-w-0 max-w-4xl space-y-10 overflow-x-clip pb-24">
+      <div className="flex w-full min-w-0 flex-col gap-5 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+        <div className="min-w-0 w-full sm:min-w-[12rem] sm:max-w-[min(100%,28rem)] sm:w-auto">
           {typeof onBack === "function" ? (
             <button
               type="button"
@@ -309,17 +309,21 @@ export default function AdminTopUpsPage({ onBack }) {
               ← Retour
             </button>
           ) : null}
-          <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900 dark:text-white md:text-[1.65rem]">
+          <h1 className="max-w-full break-words font-display text-2xl font-bold tracking-tight text-slate-900 [overflow-wrap:anywhere] dark:text-white md:text-[1.65rem]">
             Validation des recharges
           </h1>
-          <p className="mt-2 max-w-lg text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">
+          <p className="mt-2 max-w-full text-[13px] leading-relaxed text-slate-600 [overflow-wrap:anywhere] break-words dark:text-slate-400">
             Le portefeuille utilisateur est en <strong>MRU</strong>. Après virement, soit tu saisis le{" "}
             <strong>côt USD (fournisseur / API)</strong> prévu pour la recharge : la plateforme créditera automatiquement
             les MRU équivalents (+ marge comme pour une consommation), soit tu passes en mode saisie directe des{" "}
             <strong>MRU</strong>.
           </p>
         </div>
-        <div role="tablist" aria-label="Filtrer par statut" className="flex flex-wrap gap-2">
+        <div
+          role="tablist"
+          aria-label="Filtrer par statut"
+          className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end"
+        >
           {["pending", "all", "approved", "rejected"].map((s) => (
             <button
               key={s}
@@ -327,9 +331,9 @@ export default function AdminTopUpsPage({ onBack }) {
               role="tab"
               aria-selected={filter === s}
               onClick={() => setFilter(s)}
-              className={`rounded-full px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] transition ${
+              className={`min-w-0 rounded-full px-2.5 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.08em] transition sm:min-w-0 sm:px-4 sm:text-[11px] sm:tracking-[0.12em] ${
                 filter === s
-                  ? "bg-brand-600 text-white shadow-md ring-2 ring-brand-500/30 ring-offset-2 ring-offset-slate-50 dark:bg-brand-500 dark:ring-offset-slate-950"
+                  ? "bg-brand-600 text-white shadow-md ring-2 ring-brand-500/30 ring-offset-0 ring-offset-slate-50 dark:bg-brand-500 dark:ring-offset-slate-950 sm:ring-offset-2"
                   : "border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 dark:border-slate-600 dark:bg-slate-900/90 dark:text-slate-200 dark:hover:border-slate-500"
               }`}
             >
@@ -341,22 +345,22 @@ export default function AdminTopUpsPage({ onBack }) {
 
       <section
         aria-labelledby="manual-grant-heading"
-        className="rounded-3xl border border-violet-200/90 bg-gradient-to-br from-violet-50/90 via-white to-white p-5 shadow-soft-lg dark:border-violet-900/50 dark:from-violet-950/30 dark:via-slate-900 dark:to-slate-900 sm:p-6"
+        className="min-w-0 overflow-x-clip rounded-3xl border border-violet-200/90 bg-gradient-to-br from-violet-50/90 via-white to-white p-4 shadow-soft-lg dark:border-violet-900/50 dark:from-violet-950/30 dark:via-slate-900 dark:to-slate-900 sm:p-6"
       >
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-violet-200/70 pb-4 dark:border-violet-800/50">
           <div className="min-w-0">
             <h2 id="manual-grant-heading" className="font-display text-lg font-bold text-slate-900 dark:text-white">
               Crédit sans demande
             </h2>
-            <p className="mt-1.5 max-w-2xl text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">
-              Cherche un compte par e-mail (minimum 2 caractères dans l’adresse), sélectionne-le, puis utilise la même logique&nbsp;
-              <strong>USD&nbsp;→&nbsp;MRU&nbsp;(+&nbsp;marge)</strong> ou <strong>MRU directs</strong> que pour une demande avec preuve (sans passer par une demande utilisateur).
+            <p className="mt-1.5 max-w-full text-[13px] leading-relaxed text-slate-600 [overflow-wrap:anywhere] break-words dark:text-slate-400 sm:max-w-2xl">
+              Cherche un compte par e-mail (minimum 2 caractères dans l’adresse), sélectionne-le, puis utilise la même logique{" "}
+              <strong className="font-semibold">USD → MRU (+ marge)</strong> ou <strong>MRU directs</strong> que pour une demande avec preuve (sans passer par une demande utilisateur).
             </p>
           </div>
         </div>
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-5">
-          <div className="space-y-2 sm:col-span-2">
+        <div className="mt-4 grid min-w-0 gap-4 sm:grid-cols-5">
+          <div className="min-w-0 space-y-2 sm:col-span-2">
             <label htmlFor="manual-email-search" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
               Rechercher par e-mail
             </label>
@@ -398,9 +402,9 @@ export default function AdminTopUpsPage({ onBack }) {
                       }}
                       className="flex w-full flex-col items-start gap-0.5 border-b border-slate-100 px-3 py-2.5 text-left text-xs last:border-b-0 hover:bg-brand-50/80 disabled:opacity-45 dark:border-slate-800 dark:hover:bg-brand-950/40"
                     >
-                      <span className="font-semibold text-slate-900 dark:text-white">{u.email}</span>
+                      <span className="min-w-0 break-all font-semibold text-slate-900 dark:text-white">{u.email}</span>
                       <span className="tabular-nums text-slate-500 dark:text-slate-400">
-                        Solde&nbsp;≈&nbsp;
+                        Solde ≈{" "}
                         {typeof u.balance_mru_approx === "number" ? `${u.balance_mru_approx} MRU` : "—"}
                       </span>
                       {u.is_admin ? (
@@ -415,13 +419,13 @@ export default function AdminTopUpsPage({ onBack }) {
             ) : null}
           </div>
 
-          <div className="sm:col-span-3">
+          <div className="min-w-0 sm:col-span-3">
             {manualSelectedUser ? (
               <>
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-emerald-200/90 bg-emerald-50/50 px-3 py-2.5 dark:border-emerald-900/55 dark:bg-emerald-950/25">
-                  <div>
+                <div className="flex flex-col gap-2 rounded-2xl border border-emerald-200/90 bg-emerald-50/50 px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between dark:border-emerald-900/55 dark:bg-emerald-950/25">
+                  <div className="min-w-0">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">Compte sélectionné</p>
-                    <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{manualSelectedUser.email}</p>
+                    <p className="break-words text-sm font-bold text-slate-900 dark:text-white sm:truncate">{manualSelectedUser.email}</p>
                     <p className="text-[11px] text-slate-600 dark:text-slate-400">
                       Solde actuel&nbsp;≈{" "}
                       {typeof manualSelectedUser.balance_mru_approx === "number"
@@ -443,11 +447,11 @@ export default function AdminTopUpsPage({ onBack }) {
                 </div>
 
                 <div className="mt-4 space-y-4">
-                  <div className="flex flex-wrap gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-600 dark:bg-slate-950/80">
+                  <div className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 sm:flex-row sm:flex-wrap sm:gap-3 dark:border-slate-600 dark:bg-slate-950/80">
                     {["usd", "mru"].map((m) => (
                       <label
                         key={m}
-                        className={`flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ${
+                        className={`flex min-w-0 cursor-pointer items-start gap-2 rounded-xl px-3 py-2 text-xs font-semibold leading-snug sm:items-center ${
                           manualDraft.grantMode === m
                             ? "bg-brand-600 text-white shadow-inner dark:bg-brand-500"
                             : "border border-transparent text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
@@ -479,7 +483,7 @@ export default function AdminTopUpsPage({ onBack }) {
                           placeholder="ex. 0.00001"
                           value={manualDraft.supplierUsd}
                           onChange={(e) => patchManualDraft({ supplierUsd: e.target.value })}
-                          className="mt-1 w-full max-w-[14rem] rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-mono text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                          className="mt-1 w-full max-w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-mono text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950 dark:text-white sm:max-w-[14rem]"
                         />
                         {pricingParams && (() => {
                           const ux = Number(String(manualDraft.supplierUsd || "").replace(",", "."));
@@ -507,7 +511,7 @@ export default function AdminTopUpsPage({ onBack }) {
                           disabled={manualBusy}
                           value={manualDraft.extendDays}
                           onChange={(e) => patchManualDraft({ extendDays: e.target.value })}
-                          className="mt-1 w-full max-w-[12rem] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950"
+                          className="mt-1 w-full max-w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950 sm:max-w-[12rem]"
                         />
                       </div>
                     </div>
@@ -525,7 +529,7 @@ export default function AdminTopUpsPage({ onBack }) {
                           placeholder="ex. 120"
                           value={manualDraft.directMru}
                           onChange={(e) => patchManualDraft({ directMru: e.target.value })}
-                          className="mt-1 w-full max-w-[14rem] rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-mono text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950"
+                          className="mt-1 w-full max-w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-mono text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950 sm:max-w-[14rem]"
                         />
                       </div>
                       <div>
@@ -542,7 +546,7 @@ export default function AdminTopUpsPage({ onBack }) {
                           disabled={manualBusy}
                           value={manualDraft.extendDays}
                           onChange={(e) => patchManualDraft({ extendDays: e.target.value })}
-                          className="mt-1 w-full max-w-[12rem] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950"
+                          className="mt-1 w-full max-w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950 sm:max-w-[12rem]"
                         />
                       </div>
                     </div>
@@ -556,7 +560,7 @@ export default function AdminTopUpsPage({ onBack }) {
                   >
                     {manualBusy ? "Crédit en cours…" : "Créditer ce portefeuille"}
                   </button>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  <p className="max-w-full text-[11px] leading-relaxed text-slate-500 [overflow-wrap:anywhere] break-words dark:text-slate-400">
                     Impossible de créditer le compte admin avec lequel tu es connecté (sécurité). Déconnecte-toi et passe par un second navigateur ou un autre compte admin pour te créditer toi-même.
                   </p>
                 </div>
@@ -595,7 +599,7 @@ export default function AdminTopUpsPage({ onBack }) {
             return (
               <li
                 key={r.id}
-                className={`relative overflow-hidden rounded-3xl border shadow-soft-lg transition dark:shadow-none ${
+                className={`relative min-w-0 overflow-hidden rounded-3xl border shadow-soft-lg transition dark:shadow-none ${
                   isPending
                     ? "border-emerald-200/90 bg-gradient-to-br from-white via-white to-emerald-50/50 dark:border-emerald-900/45 dark:from-slate-900 dark:via-slate-900 dark:to-emerald-950/25"
                     : "border-slate-200/90 bg-white/95 dark:border-slate-700/90 dark:bg-slate-900/95"
@@ -608,18 +612,18 @@ export default function AdminTopUpsPage({ onBack }) {
                   />
                 ) : null}
 
-                <div className="p-5 pt-6 sm:p-6">
+                <div className="min-w-0 p-5 pt-6 sm:p-6">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
                         Demande #{r.id}
                       </p>
-                      <p className="mt-2 font-display text-lg font-bold text-slate-900 dark:text-white">
+                      <p className="mt-2 break-words font-display text-lg font-bold text-slate-900 [overflow-wrap:anywhere] dark:text-white">
                         {r.user_email || `Utilisateur #${r.user_id}`}
                       </p>
-                      <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-slate-500 dark:text-slate-400">
+                      <p className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-slate-500 [overflow-wrap:anywhere] break-words dark:text-slate-400">
                         <span
-                          className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                          className={`inline-flex max-w-full shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
                             r.status === "pending"
                               ? "bg-amber-100 text-amber-900 dark:bg-amber-950/80 dark:text-amber-200"
                               : r.status === "approved"
@@ -629,28 +633,32 @@ export default function AdminTopUpsPage({ onBack }) {
                         >
                           {STATUS_FR[r.status] || r.status}
                         </span>
-                        <span>·</span>
-                        <span>
-                          Envoyée&nbsp;
-                          <time dateTime={r.created_at}>{r.created_at ? new Date(r.created_at).toLocaleString("fr-FR") : "—"}</time>
+                        <span className="shrink-0">·</span>
+                        <span className="min-w-0">
+                          Envoyée{" "}
+                          <time className="break-all" dateTime={r.created_at}>
+                            {r.created_at ? new Date(r.created_at).toLocaleString("fr-FR") : "—"}
+                          </time>
                         </span>
                         {r.reviewed_at ? (
                           <>
-                            <span>·</span>
-                            <span>
-                              Traitée&nbsp;
-                              <time dateTime={r.reviewed_at}>{new Date(r.reviewed_at).toLocaleString("fr-FR")}</time>
+                            <span className="shrink-0">·</span>
+                            <span className="min-w-0">
+                              Traitée{" "}
+                              <time className="break-all" dateTime={r.reviewed_at}>
+                                {new Date(r.reviewed_at).toLocaleString("fr-FR")}
+                              </time>
                             </span>
                           </>
                         ) : null}
                       </p>
                     </div>
-                    <div className="flex flex-shrink-0 flex-wrap gap-2 sm:justify-end">
+                    <div className="flex w-full min-w-0 flex-shrink-0 flex-wrap gap-2 sm:w-auto sm:justify-end">
                       <button
                         type="button"
                         disabled={rowBusy}
                         onClick={() => openProof(r)}
-                        className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 sm:w-auto"
                       >
                         Voir la preuve
                       </button>
@@ -659,14 +667,14 @@ export default function AdminTopUpsPage({ onBack }) {
 
                   {isPending ? (
                     <div className="mt-5 space-y-4 border-t border-slate-200/80 pt-5 dark:border-slate-700/80">
-                      <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-500 dark:text-slate-400">
+                      <p className="max-w-full text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500 [overflow-wrap:anywhere] break-words dark:text-slate-400 sm:tracking-[0.15em]">
                         Méthode — coût fournisseur (USD→MRU + marge) ou MRU saisis au portefeuille
                       </p>
-                      <div className="flex flex-wrap gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-600 dark:bg-slate-950/80">
+                      <div className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 sm:flex-row sm:flex-wrap sm:gap-3 dark:border-slate-600 dark:bg-slate-950/80">
                         {["usd", "mru"].map((m) => (
                           <label
                             key={m}
-                            className={`flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ${
+                            className={`flex min-w-0 cursor-pointer items-start gap-2 rounded-xl px-3 py-2 text-xs font-semibold leading-snug sm:items-center ${
                               draft.grantMode === m
                                 ? "bg-brand-600 text-white shadow-inner dark:bg-brand-500"
                                 : "border border-transparent text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
@@ -687,7 +695,10 @@ export default function AdminTopUpsPage({ onBack }) {
                       {draft.grantMode === "usd" ? (
                         <div className="grid gap-4 sm:grid-cols-2">
                           <div>
-                            <label htmlFor={`usd-${r.id}`} className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                            <label
+                              htmlFor={`usd-${r.id}`}
+                              className="block max-w-full text-xs font-semibold leading-snug text-slate-700 [overflow-wrap:anywhere] break-words dark:text-slate-300"
+                            >
                               Coût USD aux APIs / fournisseur (sans marge client)<span className="text-rose-600 dark:text-rose-400">*</span>
                             </label>
                             <input
@@ -698,7 +709,7 @@ export default function AdminTopUpsPage({ onBack }) {
                               placeholder="ex. 0.00001"
                               value={draft.supplierUsd}
                               onChange={(e) => patchDraft(r.id, { supplierUsd: e.target.value })}
-                              className="mt-1 w-full max-w-[14rem] rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-mono text-sm tabular-nums text-slate-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+                              className="mt-1 w-full max-w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-mono text-sm tabular-nums text-slate-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950 dark:text-white sm:max-w-[14rem]"
                             />
                             {pricingParams && (() => {
                               const ux = Number(String(draft.supplierUsd || "").replace(",", "."));
@@ -706,7 +717,7 @@ export default function AdminTopUpsPage({ onBack }) {
                               const billed = ux * pricingParams.mruPerUsd * pricingParams.margin;
                               const s = billed >= 1 ? billed.toFixed(4) : billed.toPrecision(5);
                               return (
-                                <p className="mt-2 text-[11px] leading-relaxed text-emerald-800 dark:text-emerald-300">
+                                <p className="mt-2 max-w-full text-[11px] leading-relaxed text-emerald-800 [overflow-wrap:anywhere] break-words dark:text-emerald-300">
                                   <strong>{s}</strong> MRU seront environ crédités (arrondis portefeuille après) avec{" "}
                                   {pricingParams.mruPerUsd} MRU/USD et ×{pricingParams.margin} marge.
                                 </p>
@@ -727,7 +738,7 @@ export default function AdminTopUpsPage({ onBack }) {
                               disabled={rowBusy}
                               value={draft.extendDays}
                               onChange={(e) => patchDraft(r.id, { extendDays: e.target.value })}
-                              className="mt-1 w-full max-w-[12rem] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950"
+                              className="mt-1 w-full max-w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950 sm:max-w-[12rem]"
                             />
                           </div>
                         </div>
@@ -745,7 +756,7 @@ export default function AdminTopUpsPage({ onBack }) {
                               placeholder="ex. 0.05"
                               value={draft.directMru}
                               onChange={(e) => patchDraft(r.id, { directMru: e.target.value })}
-                              className="mt-1 w-full max-w-[14rem] rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-mono text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950"
+                              className="mt-1 w-full max-w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-mono text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950 sm:max-w-[14rem]"
                             />
                           </div>
                           <div>
@@ -762,7 +773,7 @@ export default function AdminTopUpsPage({ onBack }) {
                               disabled={rowBusy}
                               value={draft.extendDays}
                               onChange={(e) => patchDraft(r.id, { extendDays: e.target.value })}
-                              className="mt-1 w-full max-w-[12rem] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950"
+                              className="mt-1 w-full max-w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950 sm:max-w-[12rem]"
                             />
                           </div>
                         </div>
@@ -797,12 +808,12 @@ export default function AdminTopUpsPage({ onBack }) {
                         />
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-3 pt-1">
+                      <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:flex-wrap sm:items-stretch">
                         <button
                           type="button"
                           disabled={rowBusy}
                           onClick={() => void approveRequest(r.id)}
-                          className="inline-flex flex-1 min-w-[10rem] items-center justify-center rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/20 transition hover:from-emerald-500 hover:to-teal-500 disabled:opacity-45 sm:flex-none"
+                          className="inline-flex min-h-[2.75rem] w-full min-w-0 flex-1 items-center justify-center whitespace-normal rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-center text-sm font-bold leading-snug text-white shadow-lg shadow-emerald-600/20 transition hover:from-emerald-500 hover:to-teal-500 disabled:opacity-45 sm:min-w-[10rem] sm:w-auto sm:flex-none sm:px-5"
                         >
                           {rowBusy ? "Patienter…" : draft.grantMode === "usd" ? "Approuver (USD MRU+marge)" : `Approuver +${draft.directMru || "…"} MRU`}
                         </button>
@@ -810,7 +821,7 @@ export default function AdminTopUpsPage({ onBack }) {
                           type="button"
                           disabled={rowBusy}
                           onClick={() => void rejectRequest(r.id)}
-                          className="inline-flex items-center justify-center rounded-2xl border-2 border-rose-400/70 bg-rose-500/[0.08] px-5 py-2.5 text-sm font-bold text-rose-800 transition hover:bg-rose-500/15 disabled:opacity-45 dark:border-rose-800 dark:bg-rose-950/45 dark:text-rose-200"
+                          className="inline-flex w-full min-w-0 items-center justify-center whitespace-normal rounded-2xl border-2 border-rose-400/70 bg-rose-500/[0.08] px-4 py-2.5 text-center text-sm font-bold leading-snug text-rose-800 transition hover:bg-rose-500/15 disabled:opacity-45 dark:border-rose-800 dark:bg-rose-950/45 dark:text-rose-200 sm:w-auto sm:px-5"
                         >
                           Refuser la demande
                         </button>
@@ -819,13 +830,15 @@ export default function AdminTopUpsPage({ onBack }) {
                   ) : null}
 
                   {r.status === "approved" && typeof r.granted_mru_approx === "number" ? (
-                    <div className="mt-4 border-t border-slate-100 pt-4 text-[12px] text-slate-600 dark:border-slate-800 dark:text-slate-400">
-                      <span className="font-semibold text-slate-800 dark:text-slate-100">MRU crédités au portefeuille (approx.)&nbsp;:</span>{" "}
+                    <div className="mt-4 max-w-full border-t border-slate-100 pt-4 text-[12px] text-slate-600 [overflow-wrap:anywhere] break-words dark:border-slate-800 dark:text-slate-400">
+                      <span className="font-semibold text-slate-800 dark:text-slate-100">MRU crédités au portefeuille (approx.) :</span>{" "}
                       {r.granted_mru_approx} MRU
                     </div>
                   ) : null}
                   {r.admin_note ? (
-                    <p className="mt-2 text-[12px] italic leading-relaxed text-slate-600 dark:text-slate-400">Note&nbsp;: {r.admin_note}</p>
+                    <p className="mt-2 max-w-full text-[12px] italic leading-relaxed text-slate-600 [overflow-wrap:anywhere] break-all dark:text-slate-400">
+                      Note : {r.admin_note}
+                    </p>
                   ) : null}
                 </div>
               </li>

@@ -6,11 +6,19 @@
   html {
     @apply antialiased;
     scroll-behavior: smooth;
+    overflow-x: hidden;
+    max-width: 100%;
   }
 
   body {
-    @apply min-h-[100dvh] text-slate-900 dark:text-slate-50;
+    @apply min-h-[100dvh] max-w-[100%] overflow-x-hidden text-slate-900 dark:text-slate-50;
     text-rendering: optimizeLegibility;
+  }
+
+  #root {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   ::selection {
@@ -44,6 +52,27 @@
 
   .dark .bg-dot-grid {
     background-image: radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.05) 1px, transparent 0);
+  }
+
+  /* Page admin seule : padding safe-area fiable (évite soucis de parsing des utilitaires Tailwind arbitraires sur WebKit). */
+  .admin-main-pad {
+    box-sizing: border-box;
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+
+  @media (min-width: 640px) {
+    .admin-main-pad {
+      padding-left: max(1.5rem, env(safe-area-inset-left, 0px));
+      padding-right: max(1.5rem, env(safe-area-inset-right, 0px));
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .admin-main-pad {
+      padding-left: max(2rem, env(safe-area-inset-left, 0px));
+      padding-right: max(2rem, env(safe-area-inset-right, 0px));
+    }
   }
 
   /* Anneau gradient pour cartes hero / dropzones. */

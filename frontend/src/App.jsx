@@ -1163,65 +1163,70 @@ export default function App() {
   if (authGate.ready && !authGate.skipped && profileFlags.is_admin) {
     const adminEmail = getAuthProfile()?.email;
     return (
-      <div className="relative flex min-h-[100dvh] min-w-0 flex-col overflow-x-hidden bg-gradient-to-b from-slate-50 via-emerald-50/[0.2] to-cyan-50/25 text-slate-900 transition dark:from-slate-950 dark:via-emerald-950/[0.08] dark:to-slate-950 dark:text-slate-50">
+      <div className="relative flex min-h-[100dvh] w-full min-w-0 max-w-[100%] flex-col overflow-x-hidden bg-gradient-to-b from-slate-50 via-emerald-50/[0.2] to-cyan-50/25 text-slate-900 transition dark:from-slate-950 dark:via-emerald-950/[0.08] dark:to-slate-950 dark:text-slate-50">
         <div className="pointer-events-none fixed inset-0 bg-dot-grid opacity-35 dark:opacity-[0.18]" aria-hidden />
-        <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        {/* Même logique que l’app principale : pas de blobs animés < lg (Safari mobile + débordements visuels). */}
+        <div className="pointer-events-none fixed inset-0 hidden overflow-hidden lg:block" aria-hidden>
           <div className="absolute -left-[15%] top-[-14%] h-[min(400px,70vw)] w-[min(400px,92vw)] rounded-full bg-emerald-400/24 blur-[100px] motion-safe:animate-blob-drift dark:bg-emerald-600/12" />
           <div className="absolute bottom-[-14%] right-[-12%] h-[min(400px,60vw)] w-[min(400px,85vw)] rounded-full bg-cyan-400/20 blur-[110px] motion-safe:animate-blob-drift-reverse" />
         </div>
 
         <ToastPortal />
-        <header className="sticky top-0 z-50 px-3 pt-3 pb-1 sm:px-6">
-          <div className="glass-header mx-auto flex min-w-0 max-w-full flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 sm:max-w-5xl sm:rounded-3xl sm:px-6">
-            <div className="flex flex-col">
-              <span className="font-display text-xl font-extrabold tracking-tight">
-                <span className="text-gradient-brand">LecturAI</span>{" "}
-                <span className="align-middle text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
-                  admin
+        <header className="sticky top-0 z-50 w-full min-w-0 overflow-x-hidden px-3 pt-3 pb-1 sm:px-6">
+          <div className="glass-header mx-auto w-full min-w-0 max-w-full overflow-x-clip rounded-2xl px-4 py-3 sm:max-w-5xl sm:rounded-3xl sm:px-6">
+            <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between lg:items-center">
+              <div className="min-w-0 w-full flex-1 sm:w-auto">
+                <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1 font-display text-xl font-extrabold tracking-tight">
+                  <span className="text-gradient-brand">LecturAI</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
+                    admin
+                  </span>
                 </span>
-              </span>
-              <span className="mt-0.5 text-[11px] leading-snug text-slate-500 dark:text-slate-400">
-                Validation des demandes de recharge — aucun autre accès pour ce compte.
-              </span>
-            </div>
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <WhatsAppSupportButton variant="admin" />
-              {adminEmail ? (
-                <span
-                  title={adminEmail}
-                  className="hidden max-w-[14rem] truncate text-[10px] font-medium text-slate-500 sm:inline dark:text-slate-400"
+                <p className="mt-1 max-w-full text-[11px] leading-snug text-slate-500 [overflow-wrap:anywhere] dark:text-slate-400 sm:max-w-xl">
+                  Validation des demandes de recharge — aucun autre accès pour ce compte.
+                </p>
+              </div>
+              <div className="flex w-full min-w-0 flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+                <WhatsAppSupportButton variant="admin" className="w-full justify-center sm:w-auto" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearAuthSession();
+                    setProfileFlags({ is_admin: false });
+                    setAuthGate({ loading: false, skipped: false, ready: false, loadError: false });
+                  }}
+                  className="w-full rounded-full border border-rose-200/80 bg-rose-500/10 px-3 py-2 text-[11px] font-semibold text-rose-800 shadow-sm transition hover:bg-rose-500/15 dark:border-rose-900/60 dark:text-rose-200 dark:hover:bg-rose-950/50 sm:w-auto sm:px-3.5"
                 >
-                  {adminEmail}
-                </span>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => {
-                  clearAuthSession();
-                  setProfileFlags({ is_admin: false });
-                  setAuthGate({ loading: false, skipped: false, ready: false, loadError: false });
-                }}
-                className="rounded-full border border-rose-200/80 bg-rose-500/10 px-3.5 py-2 text-[11px] font-semibold text-rose-800 shadow-sm transition hover:bg-rose-500/15 dark:border-rose-900/60 dark:text-rose-200 dark:hover:bg-rose-950/50"
-              >
-                Déconnexion
-              </button>
-              <button
-                type="button"
-                onClick={() => setDark((d) => !d)}
-                className="rounded-full border border-slate-200/90 bg-white/60 px-3.5 py-2 text-[11px] font-semibold text-slate-700 shadow-sm transition hover:bg-white dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:bg-slate-800"
-                aria-label="Basculer thème"
-              >
-                {dark ? "☀️ Clair" : "🌙 Sombre"}
-              </button>
+                  Déconnexion
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDark((d) => !d)}
+                  className="w-full rounded-full border border-slate-200/90 bg-white/60 px-3 py-2 text-[11px] font-semibold text-slate-700 shadow-sm transition hover:bg-white dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:bg-slate-800 sm:w-auto sm:px-3.5"
+                  aria-label="Basculer thème"
+                >
+                  {dark ? "☀️ Clair" : "🌙 Sombre"}
+                </button>
+                {adminEmail ? (
+                  <span
+                    title={adminEmail}
+                    className="hidden max-w-[min(100%,14rem)] truncate text-[10px] font-medium text-slate-500 sm:inline dark:text-slate-400"
+                  >
+                    {adminEmail}
+                  </span>
+                ) : null}
+              </div>
             </div>
           </div>
         </header>
 
-        <main className="relative z-10 mx-auto w-full min-w-0 flex-1 max-w-5xl safe-pad-x px-4 py-8 sm:py-12 lg:px-8 lg:py-14">
-          <AdminTopUpsPage />
+        <main className="admin-main-pad relative z-10 mx-auto w-full min-w-0 max-w-5xl flex-1 py-8 sm:py-12 lg:py-14">
+          <div className="min-w-0 max-w-full overflow-x-clip">
+            <AdminTopUpsPage />
+          </div>
         </main>
 
-        <footer className="relative z-10 mx-auto max-w-5xl px-4 pb-8 text-center text-[11px] text-slate-500 dark:text-slate-500">
+        <footer className="admin-main-pad relative z-10 mx-auto w-full min-w-0 max-w-5xl pb-8 text-center text-[11px] text-slate-500 dark:text-slate-500">
           Connexion réservée aux comptes utilisateur sur un autre navigateur ou appareil pour transcrire ou générer des cours.
         </footer>
       </div>
