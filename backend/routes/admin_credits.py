@@ -19,6 +19,7 @@ from pricing import (
     MRU_PER_USD,
     MARGIN_MULTIPLIER,
     grant_mru_to_wallet_units,
+    mru_signed_to_wallet_units_delta,
     usd_provider_to_billed_mru,
     wallet_units_to_mru_display,
 )
@@ -52,6 +53,36 @@ class ApproveBody(BaseModel):
             raise ValueError(
                 "Indique soit supplier_cost_usd (coût API en USD avant marge), soit mru_credit (MRU à créditer au client), soit credit_amount (unités brut interne, déconseillé)."
             )
+        return self
+
+
+class ManualWalletBody(BaseModel):
+    """Ajustement portefeuille admin (sans demande) — `mru_credit` peut être négatif pour retirer."""
+
+    supplier_cost_usd: Optional[float] = Field(default=None, gt=0, lt=10_000_000)
+    mru_credit: Optional[float] = Field(default=None, gt=-1e15, lt=1e15)
+    credit_amount: Optional[int] = Field(
+        default=None,
+        gt=0,
+        le=1_000_000_000_000,
+        description="Ancienne forme : unités portefeuille brutes (positif uniquement).",
+    )
+    extend_validity_days: Optional[int] = Field(default=None, ge=1, le=3650)
+    admin_note: Optional[str] = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def exactly_one_grant_mode_manual(self):
+        modes = (
+            self.supplier_cost_usd is not None,
+            self.mru_credit is not None,
+            self.credit_amount is not None,
+        )
+        if sum(1 for m in modes if m) != 1:
+            raise ValueError(
+                "Indique soit supplier_cost_usd, soit mru_credit (positif ou négatif), soit credit_amount (unités positives)."
+            )
+        if self.mru_credit is not None and abs(float(self.mru_credit)) < 1e-12:
+            raise ValueError("Le montant MRU ne peut pas être nul (utilise un nombre positif pour créditer, négatif pour retirer).")
         return self
 
 
@@ -90,6 +121,44 @@ def _extend_validity_credit_user(usr: User, body: ApproveBody) -> tuple[int, flo
     usr.credit_balance += add_units
     usr.credits_expire_at = base + timedelta(days=extend_days)
     return add_units, mru_nominal
+
+
+def _grant_wallet_units_manual(body: ManualWalletBody) -> tuple[int, float]:
+    """Retourne (delta d’unités portefeuille, MRU équivalent signé pour l’affichage)."""
+    if body.supplier_cost_usd is not None:
+        mru = float(usd_provider_to_billed_mru(body.supplier_cost_usd))
+        return grant_mru_to_wallet_units(mru), round(mru, 10)
+    if body.mru_credit is not None:
+        mru = float(body.mru_credit)
+        return mru_signed_to_wallet_units_delta(mru), round(mru, 10)
+    assert body.credit_amount is not None
+    units = body.credit_amount
+    return units, wallet_units_to_mru_display(units)
+
+
+def _apply_manual_wallet_delta(usr: User, body: ManualWalletBody) -> tuple[int, float]:
+    delta_units, mru_nominal = _grant_wallet_units_manual(body)
+    if usr.credit_balance + delta_units < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Solde insuffisant pour ce retrait — réduis le montant MRU retiré.",
+        )
+    extend_days = body.extend_validity_days
+    now = utc_now()
+    if delta_units > 0:
+        if extend_days is None:
+            extend_days = topup_approve_extend_days_default()
+        old_exp = usr.credits_expire_at
+        if old_exp is not None:
+            oe = old_exp if old_exp.tzinfo else old_exp.replace(tzinfo=timezone.utc)
+            base = oe if oe > now else now
+        else:
+            base = now
+        if getattr(base, "tzinfo", None) is None:
+            base = base.replace(tzinfo=timezone.utc)
+        usr.credits_expire_at = base + timedelta(days=extend_days)
+    usr.credit_balance += delta_units
+    return delta_units, mru_nominal
 
 
 def _grant_response_payload(usr: User, *, add_units: int, mru_nominal: float) -> dict:
@@ -142,11 +211,11 @@ def admin_search_users(
 @router.post("/admin/users/{user_id}/grant-wallet")
 def admin_grant_wallet_manual(
     user_id: int,
-    body: ApproveBody,
+    body: ManualWalletBody,
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin_user),
 ):
-    """Crédite un utilisateur sans demande de recharge (ex. bienvenue, erreur plateforme)."""
+    """Ajoute ou retire des MRU (montant MRU négatif) sans demande de recharge."""
     usr = db.get(User, user_id)
     if not usr:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
@@ -154,7 +223,7 @@ def admin_grant_wallet_manual(
     if usr.id == admin.id:
         raise HTTPException(status_code=400, detail="Utilise ce flux pour un utilisateur qui n’est pas le compte admin courant.")
 
-    add_units, mru_nominal = _extend_validity_credit_user(usr, body)
+    add_units, mru_nominal = _apply_manual_wallet_delta(usr, body)
 
     db.add(usr)
     db.commit()

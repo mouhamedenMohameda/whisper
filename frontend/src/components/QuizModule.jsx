@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { parseQuiz } from "../utils/lessonParsers";
 
 export default function QuizModule({ lessonMarkdown }) {
+  const { t } = useTranslation();
   const quiz = useMemo(() => parseQuiz(lessonMarkdown), [lessonMarkdown]);
   const [answers, setAnswers] = useState({});
   const [revealed, setRevealed] = useState({});
@@ -28,8 +30,7 @@ export default function QuizModule({ lessonMarkdown }) {
   if (quiz.length === 0) {
     return (
       <div className="glass-panel rounded-2xl border border-dashed border-slate-300/80 p-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-        Impossible d&apos;extraire le quiz automatiquement — réessaie la génération ou consulte l&apos;onglet « Cours
-        complet ».
+        {t("quiz.empty")}
       </div>
     );
   }
@@ -41,16 +42,14 @@ export default function QuizModule({ lessonMarkdown }) {
           {correctCount}/{quiz.length}
         </div>
         <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
-          {correctCount === quiz.length
-            ? "Sans faute — continue comme ça !"
-            : "Revoyez les erreurs dans l’onglet Cours complet."}
+          {correctCount === quiz.length ? t("quiz.scoreSubPerfect") : t("quiz.scoreSubReview")}
         </p>
         <button
           type="button"
           onClick={reset}
           className="mt-6 rounded-2xl border border-slate-200/90 bg-white/70 px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-white dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:bg-slate-800"
         >
-          Recommencer le quiz
+          {t("quiz.restart")}
         </button>
       </div>
     );
@@ -70,12 +69,12 @@ export default function QuizModule({ lessonMarkdown }) {
             className={`glass-panel rounded-2xl border border-slate-200/90 p-5 dark:!bg-slate-900/50 ${locked ? "opacity-40" : ""}`}
           >
             <div className="text-sm font-semibold text-slate-900 dark:text-white">
-              Q{qi + 1}. {q.question}
+              {`${t("lesson.tabQuiz")} ${qi + 1}. ${q.question}`}
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               {q.options.map((opt, oi) => {
                 let cls =
-                  "rounded-xl border border-slate-200 px-4 py-3 text-left text-sm text-slate-800 hover:border-brand-500 dark:border-slate-700 dark:text-slate-100 dark:hover:border-brand-500";
+                  "rounded-xl border border-slate-200 px-4 py-3 text-start text-sm text-slate-800 hover:border-brand-500 dark:border-slate-700 dark:text-slate-100 dark:hover:border-brand-500";
                 if (show) {
                   if (oi === q.correct)
                     cls =

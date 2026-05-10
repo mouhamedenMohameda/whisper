@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { ENGINE_COURSE, ENGINE_TRANSCRIPTION } from "../branding.js";
 
 /** Extensions audio uniquement (pas vidéo PDF image). */
@@ -40,8 +41,8 @@ function formatBytes(n) {
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
 }
 
-function formatDur(sec) {
-  if (!sec || !Number.isFinite(sec) || sec <= 0) return "—";
+function formatDur(sec, dash) {
+  if (!sec || !Number.isFinite(sec) || sec <= 0) return dash;
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
@@ -117,8 +118,10 @@ export default function UploadZone({
   disabled,
   batchProgress,
 }) {
+  const { t } = useTranslation();
   const durations = useEstimatedDurations(files);
   const [drag, setDrag] = useState(false);
+  const dash = t("common.dash");
 
   useEffect(() => {
     if (files.length === 0 || disabled) return;
@@ -133,11 +136,16 @@ export default function UploadZone({
     }
     if (namesTooLong.length === 0) return;
     const label =
-      namesTooLong.length <= 2 ? namesTooLong.map((n) => n.slice(0, 64)).join(", ") : `${namesTooLong.length} fichier(s)`;
+      namesTooLong.length <= 2
+        ? namesTooLong.map((n) => n.slice(0, 64)).join(", ")
+        : t("upload.filesN", { n: namesTooLong.length });
     window.dispatchEvent(
       new CustomEvent("lecturai-toast", {
         detail: {
-          msg: `${label} : durée trop longue (max ${MAX_AUDIO_SECONDS / 3600} h). Fichiers retirés.`,
+          msg: t("upload.toastTooLong", {
+            label,
+            h: MAX_AUDIO_SECONDS / 3600,
+          }),
           type: "error",
         },
       }),
@@ -151,15 +159,15 @@ export default function UploadZone({
     const rejected = [];
     for (const f of arr) {
       if (AUDIO_EXTENSIONS.has(audioExtension(f.name))) accepted.push(f);
-      else rejected.push(f.name || "(fichier sans nom)");
+      else rejected.push(f.name || t("upload.unnamedFile"));
     }
     if (rejected.length) {
       const sample =
-        rejected.length <= 2 ? rejected.join(", ") : `${rejected.length} fichier(s) (ex. ${rejected[0].slice(0, 48)}…)`;
+        rejected.length <= 2 ? rejected.join(", ") : `${t("upload.filesN", { n: rejected.length })} (${rejected[0].slice(0, 48)}…)`;
       window.dispatchEvent(
         new CustomEvent("lecturai-toast", {
           detail: {
-            msg: `${sample} — seuls les fichiers audio sont acceptés (${AUDIO_EXTENSIONS_LABEL}). Pas de PDF, image ou vidéo.`,
+            msg: t("upload.toastRejected", { sample, ext: AUDIO_EXTENSIONS_LABEL }),
             type: "error",
           },
         }),
@@ -182,30 +190,46 @@ export default function UploadZone({
         Mobile : importer d’abord (ordre visual), halo marketing ensuite — évite vide au scroll + zone réglages plus haut à l’écran.
       */}
       <div className="flex flex-col gap-6 lg:grid lg:grid-cols-12 lg:gap-14 xl:gap-16">
-        <header className="order-2 space-y-3 text-center sm:space-y-4 lg:order-none lg:col-span-5 lg:text-left xl:col-span-4 lg:sticky lg:top-[6.75rem] lg:self-start">
+        <header className="order-2 space-y-3 text-center sm:space-y-4 lg:order-none lg:col-span-5 lg:text-start xl:col-span-4 lg:sticky lg:top-[6.75rem] lg:self-start">
           <div className="inline-flex rounded-full bg-gradient-to-r from-brand-500/15 via-violet-500/15 to-cyan-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.26em] text-brand-900 shadow-sm shadow-brand-500/10 dark:text-brand-100 dark:shadow-none sm:px-3.5 sm:py-1.5 sm:tracking-[0.28em]">
             {ENGINE_TRANSCRIPTION} × {ENGINE_COURSE}
           </div>
           <h1 className="font-display text-[clamp(1.45rem,5.5vw+0.65rem,2.875rem)] font-extrabold leading-[1.12] tracking-tight text-slate-900 dark:text-white sm:text-fluid-hero sm:leading-[1.1]">
-            Ton cours commence{" "}
-            <span className="text-gradient-brand">avec un fichier audio</span>
+            {t("upload.heroLead")}{" "}
+            <span className="text-gradient-brand">{t("upload.heroTitleAccent")}</span>
           </h1>
           <p className="mx-auto max-w-lg text-sm leading-relaxed text-slate-600 dark:text-slate-400 sm:text-[15px] sm:leading-[1.65] lg:mx-0 lg:max-w-none lg:text-[0.9625rem]">
-            Importe un enregistrement : nous le transcrivons avec{" "}
-            <span className="font-semibold text-slate-800 dark:text-slate-100">{ENGINE_TRANSCRIPTION}</span>, puis nous transformons le texte
-            en cours clair avec <span className="font-semibold text-slate-800 dark:text-slate-100">{ENGINE_COURSE}</span>.
+            <Trans
+              i18nKey="upload.heroBody"
+              values={{ transcription: ENGINE_TRANSCRIPTION, course: ENGINE_COURSE }}
+              components={{
+                t: <span className="font-semibold text-slate-800 dark:text-slate-100" />,
+                c: <span className="font-semibold text-slate-800 dark:text-slate-100" />,
+              }}
+            />
           </p>
-          <ul className="mx-auto mt-4 flex snap-x snap-mandatory gap-2.5 overflow-x-auto pb-1 text-left text-[12.5px] text-slate-600 dark:text-slate-400 [-ms-overflow-style:none] [scrollbar-width:none] sm:mt-5 sm:grid sm:snap-none sm:grid-cols-1 sm:gap-2.5 sm:overflow-visible lg:mx-0 lg:mt-6 xl:gap-4 [&::-webkit-scrollbar]:hidden">
+          <ul className="mx-auto mt-4 flex snap-x snap-mandatory gap-2.5 overflow-x-auto pb-1 text-start text-[12.5px] text-slate-600 dark:text-slate-400 [-ms-overflow-style:none] [scrollbar-width:none] sm:mt-5 sm:grid sm:snap-none sm:grid-cols-1 sm:gap-2.5 sm:overflow-visible lg:mx-0 lg:mt-6 xl:gap-4 [&::-webkit-scrollbar]:hidden">
             <li className="flex min-w-[min(100%,18.5rem)] shrink-0 snap-start gap-2.5 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/90 px-3 py-2.5 shadow-sm dark:border-slate-700/80 dark:from-slate-900/90 dark:to-slate-950/80 sm:min-w-0 sm:gap-3 sm:from-white/40 sm:to-transparent sm:dark:from-slate-900/40">
               <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg bg-brand-500/15 text-[11px]" aria-hidden>1</span>
               <span>
-                Fichiers <strong>volumineux acceptés</strong> : le serveur découpe automatiquement pour l’API Whisper (~25&nbsp;Mo par segment). Jusqu’à{" "}
-                <strong>{MAX_AUDIO_SECONDS / 3600}&nbsp;h</strong> par fichier (limite durée côté serveur) · plusieurs fichiers d’affilée OK.
+                <Trans
+                  i18nKey="upload.point1"
+                  values={{
+                    large: t("upload.pointLargeWord"),
+                    hours: MAX_AUDIO_SECONDS / 3600,
+                  }}
+                  components={{
+                    large: <strong />,
+                    hours: <strong />,
+                  }}
+                />
               </span>
             </li>
             <li className="flex min-w-[min(100%,18.5rem)] shrink-0 snap-start gap-2.5 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white to-violet-50/50 px-3 py-2.5 shadow-sm dark:border-slate-700/80 dark:from-slate-900/90 dark:to-violet-950/25 sm:min-w-0 sm:gap-3 sm:from-white/40 sm:to-transparent sm:dark:from-slate-900/40">
               <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-[11px]" aria-hidden>2</span>
-              <span>L’étape suivante te permet de <strong>corriger le transcript</strong> avant de générer le cours.</span>
+              <span>
+                <Trans i18nKey="upload.point2" components={{ corr: <strong /> }} />
+              </span>
             </li>
           </ul>
         </header>
@@ -241,7 +265,7 @@ export default function UploadZone({
         />
         <div className="pointer-events-none absolute left-10 right-10 top-[18%] h-px bg-gradient-to-r from-transparent via-brand-400/35 to-transparent opacity-75 dark:via-brand-300/35" aria-hidden />
         <input
-          aria-label="Importer des fichiers audio"
+          aria-label={t("upload.importAudio")}
           type="file"
           accept={ACCEPT}
           multiple
@@ -257,19 +281,18 @@ export default function UploadZone({
             <span className="pointer-events-none absolute inset-[-4px] hidden rounded-[1rem] bg-brand-400/25 opacity-70 blur-xl motion-safe:animate-breathe dark:bg-brand-600/25 lg:block" aria-hidden />
           </div>
           <h2 className="font-display text-lg font-bold tracking-tight text-slate-900 dark:text-white sm:text-[1.35rem]">
-            Glisse-dépose ou touche pour parcourir
+            {t("upload.dropTitle")}
           </h2>
           <p className="text-[13px] leading-snug text-slate-500 dark:text-slate-400 sm:text-sm sm:text-[0.948rem]">
-            {AUDIO_EXTENSIONS_LABEL} — <strong>audio uniquement</strong> · <strong>taille libre</strong> (découpage serveur pour Whisper) · jusqu’à{" "}
-            <strong>{MAX_AUDIO_SECONDS / 3600}&nbsp;h</strong> par fichier · plusieurs fichiers autorisés
+            {t("upload.dropHint", { ext: AUDIO_EXTENSIONS_LABEL, h: MAX_AUDIO_SECONDS / 3600 })}
           </p>
           <div className="flex flex-wrap justify-center gap-1.5 pt-1 sm:gap-2">
-            {AUDIO_EXTENSIONS_LABEL.split(", ").map((t) => (
+            {AUDIO_EXTENSIONS_LABEL.split(", ").map((extLabel) => (
               <span
-                key={t}
+                key={extLabel}
                 className="rounded-full border border-slate-200/90 bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-600 shadow-sm dark:border-slate-600 dark:bg-slate-900/90 dark:text-slate-300 sm:bg-white/90 sm:px-3 sm:py-1 sm:text-[11px]"
               >
-                {t}
+                {extLabel}
               </span>
             ))}
           </div>
@@ -296,12 +319,14 @@ export default function UploadZone({
                   <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
                     <span>{formatBytes(f.size)}</span>
                     <span className="text-slate-400">•</span>
-                    <span>Est. durée {formatDur(d)}</span>
+                    <span>
+                      {t("upload.estDur")} {formatDur(d, dash)}
+                    </span>
                     {disabled && (
                       <>
                         <span className="text-slate-400">•</span>
                         <span className="font-medium text-brand-600 dark:text-brand-400">
-                          Envoi {Math.round(filePct * 100)}%
+                          {t("upload.sendPct", { n: Math.round(filePct * 100) })}
                         </span>
                       </>
                     )}
@@ -321,7 +346,7 @@ export default function UploadZone({
                   className="shrink-0 rounded-xl px-3 py-2 text-[11px] font-semibold text-slate-500 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40 dark:hover:bg-rose-950/40 dark:hover:text-rose-300"
                   onClick={() => removeAt(i)}
                 >
-                  Retirer
+                  {t("upload.remove")}
                 </button>
               </li>
             );
@@ -338,7 +363,7 @@ export default function UploadZone({
             />
           </div>
           <p className="text-center text-[11px] text-slate-500">
-            Progression globale du lot · {Math.round(pctOverall * 100)}%
+            {t("upload.globalProgress", { n: Math.round(pctOverall * 100) })}
           </p>
         </div>
       )}
@@ -349,14 +374,20 @@ export default function UploadZone({
           aria-hidden
         />
         <fieldset className="space-y-2">
-          <legend className="text-sm font-bold text-slate-800 dark:text-slate-200">Langue du cours (pour la transcription)</legend>
+          <legend className="text-sm font-bold text-slate-800 dark:text-slate-200">{t("upload.fieldsetLang")}</legend>
           <p className="text-[11px] leading-snug text-slate-500 dark:text-slate-400">
-            Par défaut : <strong className="text-slate-700 dark:text-slate-300">français</strong>. À basculer en arabe si le cours oral est principal en arabe. Pas de mode « auto ».
+            <Trans
+              i18nKey="upload.langHint"
+              components={{
+                fr: <strong className="text-slate-700 dark:text-slate-300" />,
+                ar: <strong className="text-slate-700 dark:text-slate-300" />,
+              }}
+            />
           </p>
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Langue de transcription">
+          <div className="flex flex-wrap gap-2" role="group" aria-label={t("upload.langGroupAria")}>
             {[
-              { id: "fr", label: "Français" },
-              { id: "ar", label: "Arabe" },
+              { id: "fr", label: t("langs.french") },
+              { id: "ar", label: t("langs.arabic") },
             ].map((opt) => (
               <label
                 key={opt.id}
@@ -382,20 +413,20 @@ export default function UploadZone({
         </fieldset>
 
         <label className="flex flex-col gap-1.5 text-sm font-bold text-slate-800 dark:text-slate-200 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-          Matière / thème du cours
+          {t("upload.subject")}
           <span className="rounded-full bg-slate-900/[0.04] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:bg-white/[0.06] dark:text-slate-400">
-            optionnel précis recommandé
+            {t("upload.subjectBadge")}
           </span>
         </label>
         <input
           value={subject}
           onChange={(e) => onSubjectChange(e.target.value)}
-          placeholder="Biologie cellulaire, Droit constitutionnel, Algèbre linéaire…"
+          placeholder={t("upload.subjectPh")}
           className="w-full rounded-2xl border border-slate-200/95 bg-white/90 px-4 py-3.5 text-sm outline-none shadow-inner shadow-slate-900/[0.02] ring-transparent transition-[border-color,box-shadow] focus:border-brand-500 focus:ring-[3px] focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-950/85 dark:focus:border-brand-400 dark:focus:ring-brand-400/20"
           disabled={disabled}
         />
         <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
-          Plus le thème est clair, plus {ENGINE_COURSE} adapte le niveau et les exemples.
+          {t("upload.subjectHelp", { course: ENGINE_COURSE })}
         </p>
       </div>
 
@@ -409,29 +440,29 @@ export default function UploadZone({
           {disabled && (
             <span className="inline-block size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
           )}
-          Transcrire {files.length > 1 ? `${files.length} fichiers` : "l'enregistrement"}
+          {files.length > 1 ? t("upload.transcribeMany", { n: files.length }) : t("upload.transcribeOne")}
         </button>
 
         <aside
           role="note"
-          aria-label="Informations sur la précision de la transcription"
-          className="w-full shrink-0 rounded-2xl border border-amber-200/85 bg-gradient-to-br from-amber-50 via-white/90 to-orange-50/50 p-3.5 text-left shadow-md shadow-amber-900/10 dark:border-amber-900/55 dark:from-amber-950/40 dark:via-slate-950/92 dark:to-amber-950/20 sm:max-w-md sm:p-4 lg:max-w-[22rem]"
+          aria-label={t("upload.asideAria")}
+          className="w-full shrink-0 rounded-2xl border border-amber-200/85 bg-gradient-to-br from-amber-50 via-white/90 to-orange-50/50 p-3.5 text-start shadow-md shadow-amber-900/10 dark:border-amber-900/55 dark:from-amber-950/40 dark:via-slate-950/92 dark:to-amber-950/20 sm:max-w-md sm:p-4 lg:max-w-[22rem]"
         >
           <div className="flex gap-3 sm:gap-3.5">
             <span className="select-none shrink-0 text-xl leading-none text-amber-600 dark:text-amber-400" aria-hidden>
               ℹ️
             </span>
             <div className="min-w-0 space-y-2 text-[11.6px] leading-relaxed text-slate-700 dark:text-slate-300 sm:text-[12px]">
-              <p className="font-semibold text-slate-900 dark:text-white">Transcription par IA ({ENGINE_TRANSCRIPTION})</p>
-              <p>
-                Le texte généré n’est pas garanti comme parfaitement exact : erreurs possibles sur les noms propres, le jargon,
-                les chiffres ou la ponctuation. Ce n’est pas une source officielle ou un substitut à un avis professionnel — il
-                s’agit d’un outil pour t’aider à réviser.
+              <p className="font-semibold text-slate-900 dark:text-white">
+                {t("upload.asideTitle", { engine: ENGINE_TRANSCRIPTION })}
               </p>
+              <p>{t("upload.asideP1")}</p>
               <p>
-                Tu pourras <strong className="font-semibold text-slate-900 dark:text-slate-100">corriger le transcript à l&apos;étape suivante</strong>{" "}
-                avant de faire générer le cours avec {ENGINE_COURSE}. Les modèles et le produit évoluent : les résultats
-                s&apos;amélioreront encore avec le temps.
+                <Trans
+                  i18nKey="upload.asideP2"
+                  components={{ corr: <strong className="font-semibold text-slate-900 dark:text-slate-100" /> }}
+                  values={{ course: ENGINE_COURSE }}
+                />
               </p>
             </div>
           </div>

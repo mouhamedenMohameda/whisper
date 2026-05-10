@@ -1,11 +1,9 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import AuthScreen from "./components/AuthScreen.jsx";
-import AdminTopUpsPage from "./components/AdminTopUpsPage.jsx";
 import BgTranscribeJobsPanel from "./components/BgTranscribeJobsPanel.jsx";
-import CreditsPage from "./components/CreditsPage.jsx";
-import LessonViewer from "./components/LessonViewer.jsx";
+import LanguageSwitcher from "./components/LanguageSwitcher.jsx";
 import TranscriptEditor from "./components/TranscriptEditor.jsx";
-import TranscriptionHistoryPage from "./components/TranscriptionHistoryPage.jsx";
 import UploadZone from "./components/UploadZone.jsx";
 import WhatsAppSupportButton from "./components/WhatsAppSupportButton.jsx";
 import { ENGINE_COURSE, ENGINE_TRANSCRIPTION } from "./branding.js";
@@ -25,6 +23,20 @@ import { loadBgTranscribeJobIds, forgetBgTranscribeJobId, persistBgTranscribeJob
 import { clearAuthSession, getAuthProfile, getAuthToken, setAuthSession } from "./utils/authStorage.js";
 import { loadHistory, prependEntry, removeEntry, updateEntry } from "./utils/transcriptionHistory.js";
 import { mergeTranscriptMixedViews } from "./utils/transcriptMixedView.js";
+import i18n from "./i18n/index.js";
+
+const AdminTopUpsPage = lazy(() => import("./components/AdminTopUpsPage.jsx"));
+const CreditsPage = lazy(() => import("./components/CreditsPage.jsx"));
+const LessonViewer = lazy(() => import("./components/LessonViewer.jsx"));
+const TranscriptionHistoryPage = lazy(() => import("./components/TranscriptionHistoryPage.jsx"));
+
+function RouteLazyFallback() {
+  return (
+    <div className="flex min-h-[32vh] w-full items-center justify-center py-16" aria-busy="true">
+      <div className="size-10 animate-spin rounded-full border-4 border-brand-600/25 border-t-brand-600 dark:border-brand-400/20 dark:border-t-brand-400" />
+    </div>
+  );
+}
 
 const INITIAL_SESSION_USAGE = {
   whisperAudioSeconds: 0,
@@ -37,25 +49,13 @@ const INITIAL_SESSION_USAGE = {
   mixedLangCompletionTokens: 0,
 };
 
-function phaseBadgeLabels(ph) {
-  switch (ph) {
-    case "upload":
-      return { short: "Import", full: "Importer" };
-    case "transcribing":
-      return { short: "Audio", full: "Transcription" };
-    case "editing":
-      return { short: "Texte", full: "Révision" };
-    case "generating":
-      return { short: "IA…", full: "Cours" };
-    case "lesson":
-      return { short: "Prêt", full: "Prêt" };
-    case "history":
-      return { short: "Liste", full: "Historique" };
-    case "credits":
-      return { short: "MRU", full: "Portefeuille" };
-    default:
-      return { short: "Étape", full: ph };
+/** @param {string} ph @param {(key: string, opts?: object) => string} t */
+function phaseBadgeLabels(ph, t) {
+  const keys = ["upload", "transcribing", "editing", "generating", "lesson", "history", "credits"];
+  if (keys.includes(ph)) {
+    return { short: t(`phases.${ph}.short`), full: t(`phases.${ph}.full`) };
   }
+  return { short: t("phases.default.short"), full: t("phases.default.full", { phase: String(ph) }) };
 }
 
 function newHistoryId() {
@@ -72,7 +72,7 @@ function historyEntryFromTranscribePayload(data, { filenames, subject, speechLan
   const label =
     typeof data.filename === "string" && data.filename.trim()
       ? data.filename.trim()
-      : filenames[0] || "Sans titre";
+      : filenames[0] || i18n.t("history.untitled");
   const mixedPieces = [{ label, view: data.transcript_mixed_view ?? null }];
   const mergedMv = mergeTranscriptMixedViews(mixedPieces);
   const transcriptJoined = `=== ${label} ===\n\n${data.timestamped_transcript || data.transcript || ""}`;
@@ -106,7 +106,7 @@ function historyEntryFromTranscribePayload(data, { filenames, subject, speechLan
     transcriptMixedView: mergedMv ?? null,
     subject,
     speechLanguage,
-    language: String(data.language || "—"),
+    language: String(data.language || i18n.t("common.dash")),
     wordCount: wc,
     durationMinutes: Number(data.duration_minutes ?? 0),
     usage: usageSnapshot,
@@ -164,7 +164,7 @@ function ToastPortal() {
 
   return (
     <div
-      className={`fixed bottom-6 right-4 z-[200] flex max-w-sm items-start gap-3 rounded-2xl border px-4 py-3 text-sm shadow-soft-lg glass-panel motion-safe:animate-toast-in dark:!bg-slate-900/90 ${accent} safe-pad-x`}
+      className={`fixed bottom-6 end-4 z-[200] flex max-w-sm items-start gap-3 rounded-2xl border px-4 py-3 text-sm shadow-soft-lg glass-panel motion-safe:animate-toast-in dark:!bg-slate-900/90 ${accent} safe-pad-x`}
     >
       <span className="text-lg">
         {toast.type === "success" ? "✅" : toast.type === "error" ? "❌" : "ℹ️"}
@@ -226,6 +226,7 @@ function StatPill({ label, value, accent = "brand", highlight = false }) {
 }
 
 function TranscriptionProgressPanel({ transcriptionName, live }) {
+  const { t } = useTranslation();
   const up = Math.round((live.uploadFrac ?? 0) * 100);
   const srv = Math.round((live.serverFrac ?? 0) * 100);
   const overall = Math.round(
@@ -242,31 +243,32 @@ function TranscriptionProgressPanel({ transcriptionName, live }) {
     () => [
       {
         icon: "📡",
-        kicker: "Étape 1",
-        title: "Réception du média",
-        body: "Ton fichier est mis en sécurité sur le serveur, vérifié puis préparé pour l’analyse.",
+        kicker: t("transcribe.step1K"),
+        title: t("transcribe.step1Title"),
+        body: t("transcribe.step1Body"),
       },
       {
         icon: "🎙️",
-        kicker: "Étape 2",
-        title: `${transcriptionName} aligne l’audio et le texte`,
-        body: "Le moteur Whisper convertit chaque seconde audio en mots, en détectant automatiquement la langue parlée.",
+        kicker: t("transcribe.step2K"),
+        title: t("transcribe.step2Title", { name: transcriptionName }),
+        body: t("transcribe.step2Body", { name: transcriptionName }),
       },
       {
         icon: "⏱️",
-        kicker: "Étape 3",
-        title: "Repères temporels toutes les 30 s",
-        body: "Des marques de temps sont insérées pour pouvoir naviguer rapidement dans la transcription finale.",
+        kicker: t("transcribe.step3K"),
+        title: t("transcribe.step3Title"),
+        body: t("transcribe.step3Body"),
       },
       {
         icon: "💡",
-        kicker: "Astuce",
-        title: "Tu peux fermer l’onglet sans risque",
-        body: "Le travail continue côté serveur — retrouve l’avancement dans « Fichiers récents » sur l’accueil.",
+        kicker: t("transcribe.tip"),
+        title: t("transcribe.step4Title"),
+        body: t("transcribe.step4Body"),
       },
     ],
-    [transcriptionName],
+    [transcriptionName, t],
   );
+  const tipSlideIndex = slides.length - 1;
 
   let activeIdx = 0;
   if (!live.uploadFinished) activeIdx = 0;
@@ -286,11 +288,11 @@ function TranscriptionProgressPanel({ transcriptionName, live }) {
 
   useEffect(() => {
     if (userTook) return;
-    const t = setInterval(() => {
+    const timer = setInterval(() => {
       setSlide((cur) => (cur + 1) % slides.length);
       setSlideDir(1);
     }, 4200);
-    return () => clearInterval(t);
+    return () => clearInterval(timer);
   }, [userTook, slides.length]);
 
   const goPrev = () => {
@@ -310,7 +312,7 @@ function TranscriptionProgressPanel({ transcriptionName, live }) {
   };
 
   const headline =
-    (typeof live.message === "string" && live.message.trim()) || "Transcription en cours…";
+    (typeof live.message === "string" && live.message.trim()) || t("transcribe.defaultHeadline");
   const current = slides[slide];
 
   return (
@@ -320,9 +322,9 @@ function TranscriptionProgressPanel({ transcriptionName, live }) {
         <div className="pointer-events-none absolute -bottom-24 -right-10 size-60 rounded-full bg-violet-400/15 blur-3xl motion-safe:animate-blob-drift-reverse dark:bg-violet-700/15" />
 
         <div className="relative mx-auto mb-6 grid max-w-sm grid-cols-3 gap-2">
-          <StatPill label="Envoi réseau" value={up} accent="brand" />
-          <StatPill label="Trait. serveur" value={srv} accent="violet" />
-          <StatPill label="Global" value={overall} accent="emerald" highlight />
+          <StatPill label={t("transcribe.networkUp")} value={up} accent="brand" />
+          <StatPill label={t("transcribe.serverProc")} value={srv} accent="violet" />
+          <StatPill label={t("transcribe.global")} value={overall} accent="emerald" highlight />
         </div>
         <div className="relative mx-auto flex size-32 items-center justify-center">
           <div
@@ -342,7 +344,7 @@ function TranscriptionProgressPanel({ transcriptionName, live }) {
           </div>
         </div>
         <div className="relative mt-3 text-xs text-slate-500 dark:text-slate-400">
-          <AnimatedNumber value={overall} className="tabular-nums font-semibold" suffix="%" /> terminé
+          <AnimatedNumber value={overall} className="tabular-nums font-semibold" suffix="%" /> {t("transcribe.donePct")}
         </div>
         <h2 className="relative mt-4 font-display text-xl font-bold text-slate-900 dark:text-white">
           {headline}
@@ -357,7 +359,7 @@ function TranscriptionProgressPanel({ transcriptionName, live }) {
           <div className="relative h-[124px] overflow-hidden rounded-2xl border border-slate-200/80 bg-white/70 shadow-inner dark:border-slate-800/80 dark:bg-slate-950/40">
             <button
               type="button"
-              aria-label="Précédent"
+              aria-label={t("transcribe.prev")}
               onClick={goPrev}
               className="absolute left-2 top-1/2 z-10 flex size-7 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow ring-1 ring-slate-200 transition hover:bg-white hover:text-brand-600 dark:bg-slate-900/90 dark:text-slate-300 dark:ring-slate-700 dark:hover:text-brand-400"
             >
@@ -365,7 +367,7 @@ function TranscriptionProgressPanel({ transcriptionName, live }) {
             </button>
             <button
               type="button"
-              aria-label="Suivant"
+              aria-label={t("transcribe.next")}
               onClick={goNext}
               className="absolute right-2 top-1/2 z-10 flex size-7 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow ring-1 ring-slate-200 transition hover:bg-white hover:text-brand-600 dark:bg-slate-900/90 dark:text-slate-300 dark:ring-slate-700 dark:hover:text-brand-400"
             >
@@ -373,7 +375,7 @@ function TranscriptionProgressPanel({ transcriptionName, live }) {
             </button>
             <div
               key={`${slide}-${slideDir}`}
-              className={`absolute inset-0 flex flex-col justify-center px-12 text-left ${
+              className={`absolute inset-0 flex flex-col justify-center px-12 text-start ${
                 slideDir > 0
                   ? "motion-safe:animate-slide-in-right"
                   : "motion-safe:animate-slide-in-left"
@@ -381,13 +383,13 @@ function TranscriptionProgressPanel({ transcriptionName, live }) {
             >
               <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-brand-600 dark:text-brand-400">
                 <span>{current.kicker}</span>
-                {slide === activeIdx && current.kicker !== "Astuce" ? (
+                {slide === activeIdx && slide !== tipSlideIndex ? (
                   <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-[9px] font-bold text-brand-700 dark:bg-brand-900/60 dark:text-brand-200">
                     <span className="size-1.5 rounded-full bg-brand-500 motion-safe:animate-pulse" />
-                    En cours
+                    {t("transcribe.inProgress")}
                   </span>
-                ) : slide < activeIdx && current.kicker !== "Astuce" ? (
-                  <span className="text-emerald-600 dark:text-emerald-400">✓ Terminé</span>
+                ) : slide < activeIdx && slide !== tipSlideIndex ? (
+                  <span className="text-emerald-600 dark:text-emerald-400">{t("transcribe.completed")}</span>
                 ) : null}
               </div>
               <div className="mt-1 font-display text-sm font-bold text-slate-900 dark:text-white">
@@ -404,7 +406,7 @@ function TranscriptionProgressPanel({ transcriptionName, live }) {
               <button
                 key={i}
                 type="button"
-                aria-label={`Aller à : ${s.title}`}
+                aria-label={t("transcribe.slideToAria", { title: s.title })}
                 onClick={() => jumpTo(i)}
                 className={`h-1.5 rounded-full transition-all ${
                   i === slide
@@ -421,21 +423,16 @@ function TranscriptionProgressPanel({ transcriptionName, live }) {
         {(typeof live.whisperElapsedSec === "number" || typeof live.whisperExpectedSec === "number") && ph ===
         "whisper" ? (
           <p className="relative mt-5 text-xs text-slate-500 dark:text-slate-400">
-            Temps Whisper côté API ·{" "}
-            {live.whisperElapsedSec != null ? `${Math.round(live.whisperElapsedSec)} s écoulés` : "…"}
-            {live.whisperExpectedSec != null ? (
-              <>
-                {" "}
-                / ≈ {Math.round(live.whisperExpectedSec)} s attendus pour ce média
-              </>
-            ) : null}
+            {t("transcribe.whisperTimingLead")}
+            {live.whisperElapsedSec != null ? t("transcribe.elapsedOnly", { s: Math.round(live.whisperElapsedSec) }) : "…"}
+            {live.whisperExpectedSec != null ? t("transcribe.expectedPart", { s: Math.round(live.whisperExpectedSec) }) : null}
           </p>
         ) : null}
 
         {live.previewText ? (
-          <div className="relative mx-auto mt-6 max-h-48 overflow-y-auto rounded-2xl border border-slate-200/90 bg-white/75 p-4 text-left text-xs leading-relaxed text-slate-800 shadow-inner dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-100">
+          <div className="relative mx-auto mt-6 max-h-48 overflow-y-auto rounded-2xl border border-slate-200/90 bg-white/75 p-4 text-start text-xs leading-relaxed text-slate-800 shadow-inner dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-100">
             <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-              Aperçu texte brut (finalisation ensuite)
+              {t("transcribe.previewRaw")}
             </div>
             <p className="whitespace-pre-wrap">{live.previewText}</p>
           </div>
@@ -445,19 +442,17 @@ function TranscriptionProgressPanel({ transcriptionName, live }) {
   );
 }
 
-const GENERATION_STEPS = [
-  "Lecture du transcript et du thème",
-  "Structuration des chapitres et glossaire",
-  "Création du quiz et des fiches",
-  "Mise en forme finale",
-];
-
 function GeneratingSkeleton() {
+  const { t } = useTranslation();
+  const generationSteps = useMemo(
+    () => [t("generating.s1"), t("generating.s2"), t("generating.s3"), t("generating.s4")],
+    [t],
+  );
   const [idx, setIdx] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setIdx((i) => (i + 1) % GENERATION_STEPS.length), 1400);
-    return () => clearInterval(t);
-  }, []);
+    const timer = setInterval(() => setIdx((i) => (i + 1) % generationSteps.length), 1400);
+    return () => clearInterval(timer);
+  }, [generationSteps.length, t]);
 
   return (
     <div className="mx-auto w-full max-w-xl space-y-6">
@@ -469,10 +464,10 @@ function GeneratingSkeleton() {
         <div className="pointer-events-none absolute -right-20 -top-20 h-40 w-40 rounded-full bg-brand-400/20 blur-3xl dark:bg-brand-600/10" />
         <div className="relative text-4xl">✨</div>
         <h2 className="relative font-display text-xl font-bold text-slate-900 dark:text-white">
-          Génération de ton cours…
+          {t("generating.title")}
         </h2>
         <p className="relative mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-          {ENGINE_COURSE} assemble glossaire, chapitres, exemples, quiz et fiches dans un parcours clair.
+          {t("generating.subtitle", { course: ENGINE_COURSE })}
         </p>
         <div className="mx-auto mt-4 h-2 max-w-xs overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
           <div
@@ -480,9 +475,9 @@ function GeneratingSkeleton() {
             style={{ width: `${25 + (idx + 1) * 18}%` }}
           />
         </div>
-        <div className="relative mt-6 space-y-3 text-left text-sm text-slate-700 dark:text-slate-300">
-          {GENERATION_STEPS.map((label, i) => (
-            <div key={label} className="flex items-center gap-3">
+        <div className="relative mt-6 space-y-3 text-start text-sm text-slate-700 dark:text-slate-300">
+          {generationSteps.map((label, i) => (
+            <div key={i} className="flex items-center gap-3">
               <div
                 className={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                   i === idx ? "bg-brand-600 text-white shadow-glow" : "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
@@ -500,6 +495,7 @@ function GeneratingSkeleton() {
 }
 
 export default function App() {
+  const { t } = useTranslation();
   const [dark, setDark] = useDarkModeToggle();
   const [authGate, setAuthGate] = useState({
     loading: true,
@@ -626,6 +622,11 @@ export default function App() {
   const [currentHistoryId, setCurrentHistoryId] = useState(null);
 
   const historyItems = useMemo(() => loadHistory(), [historyBump]);
+  const badges = useMemo(() => phaseBadgeLabels(phase, t), [phase, t]);
+
+  useEffect(() => {
+    document.title = t("meta.title");
+  }, [t]);
 
   useEffect(() => {
     if (!authGate.ready) return undefined;
@@ -674,13 +675,13 @@ export default function App() {
               ? result.filename.trim()
               : typeof full.original_filename === "string"
                 ? full.original_filename
-                : "Audio";
+                : i18n.t("common.audio");
 
           prependEntry(
             historyEntryFromTranscribePayload(result, {
               historyId: hid,
               filenames: [fn],
-              subject: typeof full.subject === "string" ? full.subject : "General",
+              subject: typeof full.subject === "string" ? full.subject : i18n.t("common.general"),
               speechLanguage: full.speech_language === "ar" ? "ar" : "fr",
             }),
           );
@@ -689,7 +690,7 @@ export default function App() {
           void reloadCreditHud();
           window.dispatchEvent(
             new CustomEvent("lecturai-toast", {
-              detail: { msg: `Transcription prête (« ${fn} ») — ajoutée à l’historique.`, type: "success" },
+              detail: { msg: t("app.toastBgReady", { name: fn }), type: "success" },
             }),
           );
         } catch {
@@ -704,7 +705,7 @@ export default function App() {
       cancelled = true;
       clearInterval(iv);
     };
-  }, [authGate.ready, reloadCreditHud]);
+  }, [authGate.ready, reloadCreditHud, t]);
 
   const busy = phase === "transcribing" || phase === "generating";
 
@@ -746,7 +747,7 @@ export default function App() {
     setActiveTab(hasLesson ? "lesson" : "transcript");
     setPhase(hasLesson ? "lesson" : "editing");
     window.dispatchEvent(
-      new CustomEvent("lecturai-toast", { detail: { msg: "Session restaurée depuis l'historique.", type: "info" } }),
+      new CustomEvent("lecturai-toast", { detail: { msg: t("app.sessionRestored"), type: "info" } }),
     );
   };
 
@@ -754,7 +755,7 @@ export default function App() {
     removeEntry(id);
     reloadHistoryList();
     if (id === currentHistoryId) setCurrentHistoryId(null);
-    window.dispatchEvent(new CustomEvent("lecturai-toast", { detail: { msg: "Entrée supprimée.", type: "success" } }));
+    window.dispatchEvent(new CustomEvent("lecturai-toast", { detail: { msg: t("app.entryDeleted"), type: "success" } }));
   };
 
   useEffect(() => {
@@ -783,7 +784,7 @@ export default function App() {
   const exportBaseName = useMemo(() => {
     if (primaryName) return primaryName.replace(/\.[^/.]+$/, "");
     if (files[0]?.name) return files[0].name.replace(/\.[^/.]+$/, "");
-    return "lecture";
+    return i18n.t("common.lecture");
   }, [primaryName, files]);
 
   const startTranscription = async () => {
@@ -797,7 +798,9 @@ export default function App() {
       uploadFinished: false,
       serverFrac: 0,
       phase: "",
-      message: `Prêt à envoyer ${n > 1 ? "les fichiers" : "le fichier"}…`,
+      message: t("transcribe.readySend", {
+        what: n > 1 ? t("transcribe.filesWord") : t("transcribe.fileWord"),
+      }),
       estimateNote: "",
       previewText: "",
       whisperElapsedSec: null,
@@ -830,7 +833,11 @@ export default function App() {
           previewText: "",
           phase: "",
           serverFrac: 0,
-          message: `${i + 1}/${n}${n > 1 ? ` — ${f.name}` : ""} — préparation à l’envoi…`,
+          message: t("transcribe.prepSend", {
+            i: i + 1,
+            n,
+            extra: n > 1 ? t("transcribe.prepName", { name: f.name }) : "",
+          }),
         }));
         let uf = 0;
         let ufDone = false;
@@ -851,7 +858,7 @@ export default function App() {
             message:
               typeof row.message === "string" && row.message.trim()
                 ? row.message
-                : prev?.message ?? "Traitement sur le serveur…",
+                : prev?.message ?? t("transcribe.serverProcessing"),
             previewText: prev?.previewText || "",
             whisperElapsedSec: null,
             whisperExpectedSec: null,
@@ -890,7 +897,7 @@ export default function App() {
                 uploadFrac: 1,
                 uploadFinished: true,
                 serverFrac: sf,
-                message: prev?.message || "Serveur analyse le média…",
+                message: prev?.message || t("transcribe.analyzing"),
               }));
               syncRowProgress();
             },
@@ -907,7 +914,7 @@ export default function App() {
           /** @type {unknown} */
           const rawResult = terminalRow.result;
           if (!rawResult || typeof rawResult !== "object") {
-            throw new Error("Réponse transcription vide après traitement serveur.");
+            throw new Error(t("transcribe.transcribeEmpty"));
           }
           data = /** @type {Record<string, unknown>} */ (rawResult);
         } catch (fileErr) {
@@ -930,7 +937,7 @@ export default function App() {
           uploadFinished: true,
           serverFrac: 1,
           message:
-            i + 1 < n ? `Bloc ${i + 1}/${n} terminé — suivant…` : "Transcription terminée.",
+            i + 1 < n ? t("transcribe.blockDone", { i: i + 1, n }) : t("transcribe.transcribeDone"),
           whisperElapsedSec: null,
           whisperExpectedSec: null,
         }));
@@ -950,7 +957,9 @@ export default function App() {
         minutes += data.duration_minutes || 0;
       }
 
-      const langDisplay = langs.every((l) => l && l === langs[0]) ? langs[0] || "—" : "Mixed / auto";
+      const langDisplay = langs.every((l) => l && l === langs[0])
+        ? langs[0] || t("common.dash")
+        : t("common.mixedAuto");
 
       const transcriptJoined = chunks.join("\n\n---\n\n");
       const mergedMv = mergeTranscriptMixedViews(mixedPieces);
@@ -987,7 +996,7 @@ export default function App() {
       prependEntry({
         id: hid,
         createdAt: new Date().toISOString(),
-        displayTitle: files[0]?.name || "Sans titre",
+        displayTitle: files[0]?.name || t("history.untitled"),
         filenames: files.map((f) => f.name),
         transcript: transcriptFinal,
         transcriptMixedView: mergedMv ?? null,
@@ -1006,7 +1015,7 @@ export default function App() {
       void reloadCreditHud();
       window.dispatchEvent(
         new CustomEvent("lecturai-toast", {
-          detail: { msg: "Transcription prête — tu peux la corriger avant de générer le cours.", type: "success" },
+          detail: { msg: t("app.transcriptReady"), type: "success" },
         }),
       );
     } catch (e) {
@@ -1015,10 +1024,7 @@ export default function App() {
       window.dispatchEvent(
         new CustomEvent("lecturai-toast", {
           detail: {
-            msg: interrupted
-              ? e?.message ||
-                "Ton envoi s’est arrêté : garde cet onglet ouvert jusqu’à la fin, puis réessaie."
-              : e?.message || "La transcription n’a pas abouti. Réessaie ou choisis un autre fichier audio.",
+            msg: interrupted ? e?.message || t("app.uploadInterrupted") : e?.message || t("app.transcribeFail"),
             type: interrupted ? "info" : "error",
           },
         }),
@@ -1032,7 +1038,7 @@ export default function App() {
       window.dispatchEvent(
         new CustomEvent("lecturai-toast", {
           detail: {
-            msg: "Le texte est encore trop court pour générer un cours complet.",
+            msg: t("app.textTooShort"),
             type: "error",
           },
         }),
@@ -1084,14 +1090,14 @@ export default function App() {
       void reloadCreditHud();
       window.dispatchEvent(
         new CustomEvent("lecturai-toast", {
-          detail: { msg: "Ton cours est prêt ! 🎉", type: "success" },
+          detail: { msg: t("app.courseReadyToast"), type: "success" },
         }),
       );
     } catch (e) {
       window.dispatchEvent(
         new CustomEvent("lecturai-toast", {
           detail: {
-            msg: e?.message || "La génération du cours a échoué. Réessaie dans un instant.",
+            msg: e?.message || t("app.genFail"),
             type: "error",
           },
         }),
@@ -1110,7 +1116,7 @@ export default function App() {
     URL.revokeObjectURL(url);
     window.dispatchEvent(
       new CustomEvent("lecturai-toast", {
-        detail: { msg: "Transcript exporté (.txt).", type: "success" },
+        detail: { msg: t("app.exportTxtOk"), type: "success" },
       }),
     );
   };
@@ -1121,7 +1127,7 @@ export default function App() {
         <div className="pointer-events-none absolute inset-0 bg-dot-grid opacity-50 motion-reduce:hidden dark:opacity-30" aria-hidden />
         <div className="glass-panel relative z-10 flex flex-col items-center gap-4 rounded-3xl px-10 py-12 shadow-soft-lg motion-safe:animate-fade-in-up">
           <div className="size-11 animate-spin rounded-full border-4 border-brand-600/25 border-t-brand-600 dark:border-brand-400/20 dark:border-t-brand-400" />
-          <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Vérification de l’accès…</p>
+          <p className="text-sm font-medium text-slate-600 dark:text-slate-400">{t("app.checkingAccess")}</p>
         </div>
       </div>
     );
@@ -1132,15 +1138,19 @@ export default function App() {
       <div className="relative flex min-h-[100dvh] flex-col items-center justify-center gap-4 overflow-hidden bg-gradient-to-b from-slate-50 via-rose-50/30 to-white px-4 text-center dark:from-slate-950 dark:via-rose-950/10 dark:to-slate-950">
         <div className="pointer-events-none absolute inset-0 bg-dot-grid opacity-40 dark:opacity-25" aria-hidden />
         <p className="relative z-10 max-w-md text-sm text-slate-700 dark:text-slate-300">
-          Impossible de joindre l’API (configuration d’authentification). Lance le backend avec{" "}
-          <code className="rounded bg-slate-200 px-1 py-0.5 text-xs dark:bg-slate-800">uvicorn</code> et réessaie.
+          <Trans
+            i18nKey="app.apiError"
+            components={{
+              cmd: <code className="rounded bg-slate-200 px-1 py-0.5 text-xs dark:bg-slate-800" />,
+            }}
+          />
         </p>
         <button
           type="button"
           onClick={() => window.location.reload()}
           className="relative z-10 rounded-2xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-glow hover:brightness-105"
         >
-          Recharger
+          {t("common.reload")}
         </button>
       </div>
     );
@@ -1150,7 +1160,7 @@ export default function App() {
     return (
       <div className="relative flex min-h-[100dvh] min-w-0 flex-col overflow-x-hidden bg-gradient-to-b from-slate-50 via-white to-indigo-50/30 text-slate-900 transition dark:from-slate-950 dark:via-slate-950 dark:to-indigo-950/25 dark:text-slate-50">
         <div className="pointer-events-none fixed inset-0 bg-dot-grid opacity-40 dark:opacity-[0.2]" aria-hidden />
-        <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="pointer-events-none fixed inset-0 hidden overflow-hidden lg:block" aria-hidden>
           <div className="absolute -left-[18%] top-[-12%] h-[min(400px,70vw)] w-[min(400px,95vw)] rounded-full bg-brand-400/26 blur-[100px] motion-safe:animate-blob-drift dark:bg-indigo-600/16" />
           <div className="absolute bottom-[-18%] right-[-12%] h-[min(380px,65vw)] w-[min(380px,92vw)] rounded-full bg-cyan-400/24 blur-[110px] motion-safe:animate-blob-drift-reverse dark:bg-cyan-600/14" />
         </div>
@@ -1179,15 +1189,16 @@ export default function App() {
                 <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1 font-display text-xl font-extrabold tracking-tight">
                   <span className="text-gradient-brand">LecturAI</span>
                   <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
-                    admin
+                    {t("app.adminBadge")}
                   </span>
                 </span>
                 <p className="mt-1 max-w-full text-[11px] leading-snug text-slate-500 [overflow-wrap:anywhere] dark:text-slate-400 sm:max-w-xl">
-                  Validation des demandes de recharge — aucun autre accès pour ce compte.
+                  {t("app.adminSubtitle")}
                 </p>
               </div>
               <div className="flex w-full min-w-0 flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
                 <WhatsAppSupportButton variant="admin" className="w-full justify-center sm:w-auto" />
+                <LanguageSwitcher className="w-full justify-center sm:w-auto sm:justify-self-auto" />
                 <button
                   type="button"
                   onClick={() => {
@@ -1197,15 +1208,15 @@ export default function App() {
                   }}
                   className="w-full rounded-full border border-rose-200/80 bg-rose-500/10 px-3 py-2 text-[11px] font-semibold text-rose-800 shadow-sm transition hover:bg-rose-500/15 dark:border-rose-900/60 dark:text-rose-200 dark:hover:bg-rose-950/50 sm:w-auto sm:px-3.5"
                 >
-                  Déconnexion
+                  {t("app.logout")}
                 </button>
                 <button
                   type="button"
                   onClick={() => setDark((d) => !d)}
                   className="w-full rounded-full border border-slate-200/90 bg-white/60 px-3 py-2 text-[11px] font-semibold text-slate-700 shadow-sm transition hover:bg-white dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:bg-slate-800 sm:w-auto sm:px-3.5"
-                  aria-label="Basculer thème"
+                  aria-label={t("common.toggleTheme")}
                 >
-                  {dark ? "☀️ Clair" : "🌙 Sombre"}
+                  {dark ? `☀️ ${t("common.light")}` : `🌙 ${t("common.dark")}`}
                 </button>
                 {adminEmail ? (
                   <span
@@ -1222,19 +1233,20 @@ export default function App() {
 
         <main className="admin-main-pad relative z-10 mx-auto w-full min-w-0 max-w-5xl flex-1 py-8 sm:py-12 lg:py-14">
           <div className="min-w-0 max-w-full overflow-x-clip">
-            <AdminTopUpsPage />
+            <Suspense fallback={<RouteLazyFallback />}>
+              <AdminTopUpsPage />
+            </Suspense>
           </div>
         </main>
 
         <footer className="admin-main-pad relative z-10 mx-auto w-full min-w-0 max-w-5xl pb-8 text-center text-[11px] text-slate-500 dark:text-slate-500">
-          Connexion réservée aux comptes utilisateur sur un autre navigateur ou appareil pour transcrire ou générer des cours.
+          {t("app.adminFooter")}
         </footer>
       </div>
     );
   }
 
   const profileEmail = getAuthProfile()?.email;
-  const badges = phaseBadgeLabels(phase);
 
   return (
     <div className="relative flex min-h-[100dvh] min-w-0 flex-col overflow-x-hidden bg-gradient-to-b from-slate-50 via-white to-indigo-50/25 text-slate-900 transition dark:from-slate-950 dark:via-slate-950 dark:to-indigo-950/30 dark:text-slate-50">
@@ -1257,7 +1269,7 @@ export default function App() {
                     <span className="text-gradient-brand">LecturAI</span>
                   </span>
                   <span className="inline-flex shrink-0 items-center rounded-full border border-brand-500/25 bg-brand-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.22em] text-brand-700 dark:border-brand-400/35 dark:bg-brand-500/15 dark:text-brand-200">
-                    beta
+                    {t("app.beta")}
                   </span>
                   <span
                     className="inline-flex shrink-0 items-center rounded-full border border-slate-200/90 bg-white/85 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-600 shadow-sm dark:border-slate-600 dark:bg-slate-900/80 dark:text-slate-300 sm:hidden"
@@ -1267,7 +1279,7 @@ export default function App() {
                   </span>
                 </span>
                 <p className="mt-2 max-w-md text-[12px] leading-relaxed text-slate-600 dark:text-slate-400 sm:text-[13px]">
-                  De l&apos;audio au cours structuré — sans friction.
+                  {t("meta.descriptionShort")}
                 </p>
               </div>
             </div>
@@ -1281,7 +1293,7 @@ export default function App() {
                   type="button"
                   disabled={busy}
                   title={
-                    creditHud?.blocked && !creditHud.canUse ? creditHud.blocked : "Solde MRU — portefeuille et recharge"
+                    creditHud?.blocked && !creditHud.canUse ? creditHud.blocked : t("app.walletTitle")
                   }
                   onClick={() => setPhase("credits")}
                   className={`rounded-full border px-3 py-2 text-[11px] font-bold shadow-sm backdrop-blur-sm transition hover:brightness-[1.02] disabled:cursor-not-allowed disabled:opacity-45 tabular-nums sm:px-4 ${
@@ -1303,8 +1315,9 @@ export default function App() {
                 }}
                 className="rounded-full border border-slate-200/90 bg-white/75 px-3 py-2 text-[11px] font-bold text-slate-800 shadow-sm backdrop-blur-md transition hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-600 dark:bg-slate-900/80 dark:text-slate-100 dark:hover:bg-slate-800 sm:px-4"
               >
-                Historique
+                {t("app.historyBtn")}
               </button>
+              <LanguageSwitcher className="rounded-full border border-slate-200/90 bg-white/75 px-2 py-1.5 text-[11px] font-bold text-slate-800 shadow-sm backdrop-blur-md dark:border-slate-600 dark:bg-slate-900/80 dark:text-slate-100" />
               <WhatsAppSupportButton variant="header" />
               {authGate.skipped !== true && profileEmail ? (
                 <span
@@ -1324,17 +1337,17 @@ export default function App() {
                   }}
                   className="rounded-full border border-rose-300/60 bg-white/85 px-3 py-2 text-[11px] font-bold text-rose-800 shadow-sm transition hover:bg-rose-50 dark:border-rose-900/55 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/70 sm:px-4"
                 >
-                  Déconnexion
+                  {t("app.logout")}
                 </button>
               ) : null}
               <button
                 type="button"
                 onClick={() => setDark((d) => !d)}
                 className="inline-flex items-center rounded-full border border-slate-200/90 bg-slate-900/[0.03] px-3 py-2 text-[11px] font-semibold text-slate-700 transition hover:bg-white dark:border-slate-600 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-slate-800"
-                aria-label="Basculer thème"
+                aria-label={t("common.toggleTheme")}
               >
                 <span aria-hidden>{dark ? "☀️" : "🌙"}</span>
-                <span className="ml-1 hidden sm:inline">{dark ? "Clair" : "Sombre"}</span>
+                <span className="ms-1 hidden sm:inline">{dark ? t("common.light") : t("common.dark")}</span>
               </button>
             </div>
           </div>
@@ -1343,15 +1356,21 @@ export default function App() {
 
       <main className="relative z-10 mx-auto w-full min-w-0 flex-1 max-w-6xl safe-pad-x px-4 py-8 pb-14 sm:px-6 lg:px-10 lg:py-12 xl:pb-20">
         {phase === "history" && (
-          <TranscriptionHistoryPage
-            items={historyItems}
-            onBack={() => setPhase("upload")}
-            onOpen={openHistoryEntry}
-            onDelete={deleteHistoryEntry}
-          />
+          <Suspense fallback={<RouteLazyFallback />}>
+            <TranscriptionHistoryPage
+              items={historyItems}
+              onBack={() => setPhase("upload")}
+              onOpen={openHistoryEntry}
+              onDelete={deleteHistoryEntry}
+            />
+          </Suspense>
         )}
 
-        {phase === "credits" && <CreditsPage onBack={() => setPhase("upload")} onWalletUpdated={reloadCreditHud} />}
+        {phase === "credits" && (
+          <Suspense fallback={<RouteLazyFallback />}>
+            <CreditsPage onBack={() => setPhase("upload")} onWalletUpdated={reloadCreditHud} />
+          </Suspense>
+        )}
 
         {phase === "upload" && (
           <>
@@ -1375,11 +1394,13 @@ export default function App() {
             {files.length > 0 && (
               <section className="glass-panel mx-auto mb-8 w-full max-w-xl space-y-3 rounded-3xl p-5 shadow-soft">
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-                  Envoi et traitement
+                  {t("transcribe.sectionTitle")}
                 </div>
                 <p className="text-[10px] leading-snug text-slate-500 dark:text-slate-400">
-                  Barre globale : {TRANSCRIBE_UPLOAD_WEIGHT * 100}% envoi fichier + {TRANSCRIBE_SERVER_WEIGHT * 100}%
-                  analyse serveur (Whisper puis finalisation).
+                  {t("transcribe.barExplain", {
+                    upload: Math.round(TRANSCRIBE_UPLOAD_WEIGHT * 100),
+                    server: Math.round(TRANSCRIBE_SERVER_WEIGHT * 100),
+                  })}
                 </p>
                 <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                   <div
@@ -1395,7 +1416,7 @@ export default function App() {
                         <div className="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
                           <span className="truncate">{f.name}</span>
                           <span className="shrink-0 font-semibold text-brand-600 dark:text-brand-400">
-                            Global {Math.round(p * 100)}%
+                            {t("transcribe.global")} {Math.round(p * 100)}%
                           </span>
                         </div>
                         <div className="mt-1 h-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
@@ -1419,12 +1440,10 @@ export default function App() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="space-y-1">
                 <h2 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
-                  Peaufine ton transcript
+                  {t("app.polishTitle")}
                 </h2>
                 <p className="max-w-xl text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-                  {ENGINE_TRANSCRIPTION} peut se tromper sur les noms propres ou le jargon : corrige le texte ici avant
-                  que{" "}
-                  {ENGINE_COURSE} ne construise le cours.
+                  {t("app.polishBody", { transcription: ENGINE_TRANSCRIPTION, course: ENGINE_COURSE })}
                 </p>
               </div>
               <button
@@ -1432,7 +1451,7 @@ export default function App() {
                 onClick={goUpload}
                 className="rounded-2xl border border-slate-200/90 bg-white/70 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100 dark:hover:bg-slate-800"
               >
-                ← Nouvel import
+                {t("app.newImport")}
               </button>
             </div>
 
@@ -1440,7 +1459,7 @@ export default function App() {
               value={transcript}
               onChange={setTranscript}
               language={language}
-              speechLanguageChosen={speechLanguage === "ar" ? "arabe" : "français"}
+              speechLanguageChosen={speechLanguage === "ar" ? t("langs.arabic") : t("langs.french")}
               wordCount={wordCount}
               durationMinutes={durationMinutes}
               primaryFileName={primaryName}
@@ -1450,17 +1469,15 @@ export default function App() {
             />
 
             <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-500">
-              Les montants MRU sont indicatifs pour cette session. Les détails de la génération du cours figureront après
-              l&apos;étape suivante.
+              {t("app.mruFootnote")}
             </p>
 
             <div className="glass-panel rounded-3xl border border-brand-200/60 bg-gradient-to-br from-brand-50/90 via-white to-violet-50/50 p-8 text-center shadow-soft dark:border-brand-900/40 dark:from-slate-900/80 dark:via-slate-900 dark:to-violet-950/20">
               <h3 className="font-display text-xl font-bold text-slate-900 dark:text-white">
-                ✨ Passer au cours structuré
+                {t("app.structuredTitle")}
               </h3>
               <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-                {ENGINE_COURSE} produit glossaire, chapitres avec exemples, tableau récapitulatif, quiz et fiches —
-                exportables quand tu veux.
+                {t("app.structuredBody", { course: ENGINE_COURSE })}
               </p>
               <button
                 type="button"
@@ -1468,7 +1485,7 @@ export default function App() {
                 disabled={busy}
                 className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-brand-600 via-brand-500 to-violet-600 px-8 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none dark:disabled:opacity-40"
               >
-                ✨ Générer le cours
+                {t("app.genCourse")}
               </button>
             </div>
           </div>
@@ -1477,58 +1494,57 @@ export default function App() {
         {phase === "generating" && <GeneratingSkeleton />}
 
         {phase === "lesson" && (
-          <LessonViewer
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            transcript={transcript}
-            transcriptMixedView={transcriptMixedView}
-            lesson={lesson}
-            subject={subject || "General"}
-            filename={exportBaseName}
-            language={language}
-            speechChosenLabel={speechLanguage === "ar" ? "Arabe" : "Français"}
-            wordCount={wordCount}
-            durationMinutes={durationMinutes}
-            celebration={celebrate}
-            usage={sessionUsage}
-          />
-        )}
-
-        {phase === "lesson" && (
-          <div className="mx-auto mt-10 flex max-w-3xl flex-wrap justify-between gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                setLesson("");
-                setPhase("editing");
-              }}
-              className="rounded-2xl border border-slate-200/90 bg-white/60 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
-            >
-              ← Retour au transcript
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setLesson("");
-                setTranscript("");
-                setTranscriptMixedView(null);
-                setFiles([]);
-                setSpeechLanguage("fr");
-                setPhase("upload");
-                setBatchProgress({ perFile: [], overallPct: 0 });
-                setSessionUsage({ ...INITIAL_SESSION_USAGE });
-                setCurrentHistoryId(null);
-              }}
-              className="rounded-2xl border border-transparent px-4 py-2.5 text-sm font-semibold text-brand-700 transition hover:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-950"
-            >
-              Nouvelle session
-            </button>
-          </div>
+          <Suspense fallback={<RouteLazyFallback />}>
+            <LessonViewer
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+              transcript={transcript}
+              transcriptMixedView={transcriptMixedView}
+              lesson={lesson}
+              subject={subject || "General"}
+              filename={exportBaseName}
+              language={language}
+              speechChosenLabel={speechLanguage === "ar" ? t("langs.arabic") : t("langs.french")}
+              wordCount={wordCount}
+              durationMinutes={durationMinutes}
+              celebration={celebrate}
+              usage={sessionUsage}
+            />
+            <div className="mx-auto mt-10 flex max-w-3xl flex-wrap justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setLesson("");
+                  setPhase("editing");
+                }}
+                className="rounded-2xl border border-slate-200/90 bg-white/60 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                {t("app.backTranscript")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLesson("");
+                  setTranscript("");
+                  setTranscriptMixedView(null);
+                  setFiles([]);
+                  setSpeechLanguage("fr");
+                  setPhase("upload");
+                  setBatchProgress({ perFile: [], overallPct: 0 });
+                  setSessionUsage({ ...INITIAL_SESSION_USAGE });
+                  setCurrentHistoryId(null);
+                }}
+                className="rounded-2xl border border-transparent px-4 py-2.5 text-sm font-semibold text-brand-700 transition hover:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-950"
+              >
+                {t("app.newSession")}
+              </button>
+            </div>
+          </Suspense>
         )}
       </main>
 
       <footer className="relative z-10 mx-4 mb-6 mt-auto rounded-3xl border border-white/50 bg-white/45 px-4 py-6 text-center text-xs leading-relaxed text-slate-500 shadow-sm backdrop-blur-md dark:border-slate-700/70 dark:bg-slate-950/55 dark:text-slate-400 sm:mx-auto sm:max-w-6xl sm:px-6 safe-pad-b">
-        Conçu pour de longues séances de révision — interface pensée tactile et clavier, sur tous les écrans.
+        {t("app.footer")}
       </footer>
     </div>
   );

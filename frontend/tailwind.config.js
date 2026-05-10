@@ -8,6 +8,7 @@ export default {
     extend: {
       fontFamily: {
         sans: [
+          "Cairo",
           "Inter",
           "ui-sans-serif",
           "system-ui",
@@ -17,6 +18,7 @@ export default {
         ],
         display: [
           "Plus Jakarta Sans",
+          "Cairo",
           "Inter",
           "ui-sans-serif",
           "system-ui",

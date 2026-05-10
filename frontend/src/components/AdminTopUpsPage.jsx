@@ -24,9 +24,11 @@ const defaultDraft = () => ({
 
 /**
  * @param {ReturnType<defaultDraft>} draft
+ * @param {{ allowMruDebit?: boolean }} [opts]
  * @returns {{ ok: true, payload: Record<string, unknown> } | { ok: false, error: string }}
  */
-function approvePayloadFromDraft(draft) {
+function approvePayloadFromDraft(draft, opts = {}) {
+  const allowMruDebit = Boolean(opts.allowMruDebit);
   /** @type {Record<string, unknown>} */
   const payload = {};
   const extRaw = String(draft.extendDays).trim();
@@ -48,7 +50,15 @@ function approvePayloadFromDraft(draft) {
     payload.supplier_cost_usd = u;
   } else {
     const m = Number(String(draft.directMru || "").trim().replace(",", "."));
-    if (!Number.isFinite(m) || m <= 0) {
+    if (!Number.isFinite(m) || m === 0) {
+      return {
+        ok: false,
+        error: allowMruDebit
+          ? "Indique un montant MRU non nul (positif = crédit, négatif = retrait, ex. -50 ou -25.5)."
+          : "Indique un montant MRU à créditer (positif).",
+      };
+    }
+    if (!allowMruDebit && m < 0) {
       return { ok: false, error: "Indique un montant MRU à créditer (positif)." };
     }
     payload.mru_credit = m;
@@ -236,7 +246,7 @@ export default function AdminTopUpsPage({ onBack }) {
 
   async function grantManualCredit() {
     if (!manualSelectedUser) return;
-    const built = approvePayloadFromDraft(manualDraft);
+    const built = approvePayloadFromDraft(manualDraft, { allowMruDebit: true });
     if (!built.ok) {
       toast(built.error, "error");
       return;
@@ -250,10 +260,13 @@ export default function AdminTopUpsPage({ onBack }) {
       });
       const p = await parseJsonResponse(res);
       if (!p.ok) throw new Error(p.errorMessage || "Crédit impossible.");
-      const msg =
-        typeof p.data?.mru_credited_approx === "number"
-          ? `Portefeuille crédité (~${Number(p.data.mru_credited_approx).toPrecision(8)} MRU ajoutés).`
-          : "Portefeuille mis à jour.";
+      const mruApprox = typeof p.data?.mru_credited_approx === "number" ? Number(p.data.mru_credited_approx) : null;
+      let msg = "Portefeuille mis à jour.";
+      if (mruApprox != null) {
+        const s = Number(mruApprox.toPrecision(8));
+        if (s > 0) msg = `Portefeuille crédité (~${s} MRU ajoutés).`;
+        else if (s < 0) msg = `Portefeuille débité (~${Number(Math.abs(s).toPrecision(8))} MRU retirés).`;
+      }
       toast(msg, "success");
       if (manualSelectedUser && p.data?.user_id === manualSelectedUser.id) {
         setManualSelectedUser((prev) =>
@@ -464,7 +477,7 @@ export default function AdminTopUpsPage({ onBack }) {
                           disabled={manualBusy}
                           onChange={() => patchManualDraft({ grantMode: m })}
                         />
-                        {m === "usd" ? "Depuis coût fournisseur (USD)" : "Montant MRU au portefeuille"}
+                        {m === "usd" ? "Depuis coût fournisseur (USD)" : "Ajustement MRU (solde ±)"}
                       </label>
                     ))}
                   </div>
@@ -519,18 +532,22 @@ export default function AdminTopUpsPage({ onBack }) {
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div>
                         <label htmlFor="manual-mru" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                          MRU à ajouter au portefeuille<span className="text-rose-600 dark:text-rose-400">*</span>
+                          MRU à créditer (+) ou retirer (−)<span className="text-rose-600 dark:text-rose-400">*</span>
                         </label>
                         <input
                           id="manual-mru"
                           type="text"
                           inputMode="decimal"
                           disabled={manualBusy}
-                          placeholder="ex. 120"
+                          placeholder="ex. 120 ou -50"
                           value={manualDraft.directMru}
                           onChange={(e) => patchManualDraft({ directMru: e.target.value })}
                           className="mt-1 w-full max-w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-mono text-sm tabular-nums outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-45 dark:border-slate-600 dark:bg-slate-950 sm:max-w-[14rem]"
                         />
+                        <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                          Nombre <strong>positif</strong> : ajoute au solde. <strong>Négatif</strong> (ex. <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">-100</code>) : retire
+                          du solde (refusé si le solde est insuffisant). Un retrait ne prolonge pas la date de validité.
+                        </p>
                       </div>
                       <div>
                         <label htmlFor="manual-days-mru" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -558,7 +575,7 @@ export default function AdminTopUpsPage({ onBack }) {
                     onClick={() => void grantManualCredit()}
                     className="w-full rounded-2xl bg-gradient-to-r from-violet-600 to-brand-600 py-3 text-sm font-bold text-white shadow-lg shadow-violet-600/20 transition hover:from-violet-500 hover:to-brand-500 disabled:opacity-45 sm:w-auto sm:min-w-[12rem]"
                   >
-                    {manualBusy ? "Crédit en cours…" : "Créditer ce portefeuille"}
+                    {manualBusy ? "Application…" : "Appliquer au portefeuille"}
                   </button>
                   <p className="max-w-full text-[11px] leading-relaxed text-slate-500 [overflow-wrap:anywhere] break-words dark:text-slate-400">
                     Impossible de créditer le compte admin avec lequel tu es connecté (sécurité). Déconnecte-toi et passe par un second navigateur ou un autre compte admin pour te créditer toi-même.

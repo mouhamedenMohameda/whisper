@@ -1,9 +1,11 @@
+import { useTranslation } from "react-i18next";
 import { SUPPORT_WHATSAPP_HREF } from "../branding.js";
 
 /**
  * @param {{ variant?: "header" | "auth" | "admin"; className?: string }} props
  */
 export default function WhatsAppSupportButton({ variant = "header", className = "" }) {
+  const { t } = useTranslation();
   const styles =
     variant === "auth"
       ? "inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-emerald-300/70 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-900 shadow-sm transition hover:bg-emerald-500/15 dark:border-emerald-800/70 dark:bg-emerald-950/40 dark:text-emerald-100 dark:hover:bg-emerald-950/60"
@@ -19,8 +21,8 @@ export default function WhatsAppSupportButton({ variant = "header", className = 
       className={`${styles} ${className}`.trim()}
     >
       <span aria-hidden>💬</span>
-      <span>Support</span>
-      <span className="sr-only"> — contacter l&apos;admin sur WhatsApp (nouvel onglet)</span>
+      <span>{t("common.support")}</span>
+      <span className="sr-only">{t("common.supportSr")}</span>
     </a>
   );
 }

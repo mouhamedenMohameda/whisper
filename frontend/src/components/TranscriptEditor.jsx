@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { ENGINE_TRANSCRIPTION } from "../branding.js";
 import TranscriptMixedView from "./TranscriptMixedView.jsx";
 import { estimateTokensFromText, formatMru } from "../utils/usage.js";
@@ -15,6 +16,7 @@ export default function TranscriptEditor({
   usage = {},
   mixedView = null,
 }) {
+  const { t } = useTranslation();
   const [showTextFallback, setShowTextFallback] = useState(false);
   const liveTok = estimateTokensFromText(value);
   const secs = usage?.whisperAudioSeconds ?? 0;
@@ -35,53 +37,59 @@ export default function TranscriptEditor({
       <div className="flex flex-wrap gap-2">
         {speechLanguageChosen ? (
           <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/35 dark:text-emerald-100">
-            Langue choisie : <span className="capitalize">{speechLanguageChosen}</span>
+            {t("editor.langChosen")}
+            <span className="inline">{speechLanguageChosen}</span>
           </span>
         ) : null}
         <span className="rounded-full border border-slate-200 px-3 py-1 text-xs dark:border-slate-700 dark:text-slate-300">
-          🌐 Sortie Whisper&nbsp;: <span className="font-medium">{language || "—"}</span>
+          🌐 {t("editor.whisperOut")}
+          <span className="font-medium">{language || t("common.dash")}</span>
         </span>
         <span className="rounded-full border border-slate-200 px-3 py-1 text-xs dark:border-slate-700 dark:text-slate-300">
-          📝 ~{wordCount || 0} mots
+          📝 {t("editor.words", { n: wordCount || 0 })}
         </span>
         {durationMinutes > 0 && (
           <span className="rounded-full border border-slate-200 px-3 py-1 text-xs dark:border-slate-700 dark:text-slate-300">
-            ⏱ ~{durationMinutes} min audio
+            ⏱ {t("editor.minAudio", { n: durationMinutes })}
           </span>
         )}
         <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs dark:border-violet-800 dark:bg-violet-950/50 dark:text-violet-100">
-          🧮 ~{liveTok} jetons <span className="opacity-75">(texte · estim.)</span>
+          🧮 {t("editor.tokEst", { n: liveTok })}
+          <span className="opacity-75">{t("editor.tokEstHint")}</span>
         </span>
         {(apiTokSum > 0 || secs > 0) && (
           <span className="rounded-full border border-slate-200 px-3 py-1 text-xs dark:border-slate-700 dark:text-slate-300">
-            Whisper · ~{apiTokSum || "—"} jetons
-            {audioMinDisp ? ` · ${audioMinDisp} min réel` : ""}
+            {t("editor.whisperTok", {
+              engine: ENGINE_TRANSCRIPTION,
+              n: apiTokSum > 0 ? apiTokSum : t("common.dash"),
+              min: audioMinDisp ? t("editor.realMin", { n: audioMinDisp }) : "",
+            })}
           </span>
         )}
         <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-          💰 Transcription&nbsp;: ~{formatMru(usage?.whisperBilledMru ?? 0)} MRU
+          💰 {t("editor.mruLine", { n: formatMru(usage?.whisperBilledMru ?? 0) })}
         </span>
         {unifiedPrimary && foreignN > 0 && showVioletHero ? (
           <span className="rounded-full border border-red-200/90 bg-red-50 px-3 py-1 text-xs font-medium text-red-900 dark:border-red-900/60 dark:bg-red-950/45 dark:text-red-100">
-            🌍 {foreignN > 1 ? `${foreignN} autres langues` : "1 autre langue"}
+            🌍 {t("editor.langsOther", { count: foreignN })}
           </span>
         ) : unifiedPrimary && showVioletHero ? (
           <span className="rounded-full border border-violet-200 px-3 py-1 text-xs dark:border-violet-800 dark:text-violet-200/90">
-            Transcription vue unifiée
+            {t("editor.unifiedView")}
           </span>
         ) : unifiedPrimary && !showVioletHero ? (
           <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-            Édition manuelle — surlignage désactivé
+            {t("editor.manualEdit")}
           </span>
         ) : null}
         {unifiedPrimary && showVioletHero && highRelN > 0 ? (
           <span className="rounded-full border border-violet-300/70 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-950 dark:border-violet-700 dark:bg-violet-950/50 dark:text-violet-100">
-            ✓ {highRelN > 1 ? `${highRelN} passages très nets` : "1 passage très net"}
+            ✓ {t("editor.clearPassage", { count: highRelN })}
           </span>
         ) : null}
         {mixPrompt + mixComp > 0 ? (
           <span className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 dark:border-slate-600 dark:text-slate-400">
-            Langues (GPT)&nbsp;: ~{mixPrompt + mixComp} jetons
+            {t("editor.gptTok", { n: mixPrompt + mixComp })}
           </span>
         ) : null}
       </div>
@@ -89,12 +97,16 @@ export default function TranscriptEditor({
       {unifiedPrimary && showVioletHero ? (
         <>
           <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-            <span className="font-semibold text-red-600 dark:text-red-400">Rouge</span> : autre langue.{" "}
-            <span className="font-semibold text-violet-700 dark:text-violet-300">Violet</span> : passage très net à
-            l’oral. C’est ce texte qui sert pour générer le cours.
+            <Trans
+              i18nKey="editor.legendUnified"
+              components={{
+                red: <span className="font-semibold text-red-600 dark:text-red-400" />,
+                violet: <span className="font-semibold text-violet-700 dark:text-violet-300" />,
+              }}
+            />
           </p>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">Transcript</h3>
+            <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">{t("editor.transcriptHeading")}</h3>
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
@@ -103,47 +115,45 @@ export default function TranscriptEditor({
                   navigator.clipboard.writeText(txt);
                   window.dispatchEvent(
                     new CustomEvent("lecturai-toast", {
-                      detail: { msg: "Transcription copiée.", type: "success" },
+                      detail: { msg: t("editor.copyOk"), type: "success" },
                     }),
                   );
                 }}
                 className="rounded-xl border border-violet-200/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-violet-800 shadow-sm transition hover:bg-white dark:border-violet-900 dark:bg-violet-950/50 dark:text-violet-100 dark:hover:bg-violet-950"
               >
-                📋 Copier
+                {t("editor.copy")}
               </button>
               <button
                 type="button"
                 onClick={onExportTxt}
                 className="rounded-xl border border-slate-200/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-white dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
               >
-                📝 Exporter .txt
+                {t("editor.exportTxt")}
               </button>
             </div>
           </div>
-          <TranscriptMixedView view={mixedView} emptyHint="Vue vide — réessaie la transcription." />
+          <TranscriptMixedView view={mixedView} emptyHint={t("editor.emptyUnified")} />
           <button
             type="button"
             onClick={() => setShowTextFallback((s) => !s)}
             className="text-xs font-semibold text-slate-600 underline underline-offset-2 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
           >
-            {showTextFallback ? "▼ Masquer" : "▶"} Éditer le texte seul
+            {showTextFallback ? t("editor.toggleHide") : t("editor.toggleShow")}
+            {t("editor.editPlainOnly")}
           </button>
           {showTextFallback ? (
             <textarea
               value={value}
               onChange={(e) => onChange(e.target.value)}
               spellCheck
-              aria-label="Texte brut pour affinage avant génération du cours"
+              aria-label={t("editor.textareaUnifiedAria")}
               className="glass-panel min-h-[220px] w-full rounded-2xl border border-slate-200/90 p-4 text-sm leading-relaxed text-slate-900 outline-none ring-brand-500/15 focus:border-brand-500 focus:ring-4 dark:border-slate-700 dark:!bg-slate-950/75 dark:text-slate-100"
             />
           ) : null}
         </>
       ) : unifiedPrimary && !showVioletHero ? (
         <>
-          <p className="text-sm leading-relaxed text-amber-900/85 dark:text-amber-100/90">
-            Texte modifié à la main — les couleurs sont masquées. « Revenir au texte unifiée » restaure la version
-            surlignée.
-          </p>
+          <p className="text-sm leading-relaxed text-amber-900/85 dark:text-amber-100/90">{t("editor.manualWarn")}</p>
           <textarea
             value={value}
             onChange={(e) => onChange(e.target.value)}
@@ -157,32 +167,29 @@ export default function TranscriptEditor({
                 if (typeof mixedView?.plain_text === "string") onChange(mixedView.plain_text);
                 window.dispatchEvent(
                   new CustomEvent("lecturai-toast", {
-                    detail: { msg: "Texte réinitialisé depuis la vue unifiée.", type: "success" },
+                    detail: { msg: t("editor.resetUnifiedToast"), type: "success" },
                   }),
                 );
               }}
               className="rounded-xl border border-violet-200 px-4 py-2 text-xs font-semibold text-violet-800 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-100 dark:hover:bg-violet-950/50"
             >
-              Revenir au texte unifiée (auto)
+              {t("editor.restoreUnified")}
             </button>
             <button
               type="button"
               onClick={() => navigator.clipboard.writeText(value)}
               className="rounded-xl border border-slate-200/90 px-4 py-2 text-xs font-semibold text-slate-700 dark:border-slate-600 dark:text-slate-200"
             >
-              📋 Copier
+              {t("editor.copy")}
             </button>
             <button type="button" onClick={onExportTxt} className="rounded-xl border border-slate-200/90 px-4 py-2 text-xs font-semibold text-slate-700 dark:border-slate-600 dark:text-slate-200">
-              📝 Exporter .txt
+              {t("editor.exportTxt")}
             </button>
           </div>
         </>
       ) : (
         <>
-          <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-            {ENGINE_TRANSCRIPTION} reste littéral : relis le bloc et corrige les noms, acronymes et découpures avant de
-            lancer la génération du cours.
-          </p>
+          <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-400">{t("editor.literalHint", { engine: ENGINE_TRANSCRIPTION })}</p>
           <textarea
             value={value}
             onChange={(e) => onChange(e.target.value)}
@@ -196,33 +203,27 @@ export default function TranscriptEditor({
                 navigator.clipboard.writeText(value);
                 window.dispatchEvent(
                   new CustomEvent("lecturai-toast", {
-                    detail: { msg: "Transcript copié.", type: "success" },
+                    detail: { msg: t("editor.copyTranscriptOk"), type: "success" },
                   }),
                 );
               }}
               className="rounded-2xl border border-slate-200/90 bg-white/70 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
             >
-              📋 Copier
+              {t("editor.copy")}
             </button>
             <button
               type="button"
               onClick={onExportTxt}
               className="rounded-2xl border border-slate-200/90 bg-white/70 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
             >
-              📝 Exporter .txt
+              {t("editor.exportTxt")}
             </button>
-            <span className="self-center text-xs text-slate-400">
-              {primaryFileName ? `Source: ${primaryFileName}` : ""}
-            </span>
+            <span className="self-center text-xs text-slate-400">{primaryFileName ? t("editor.source", { name: primaryFileName }) : ""}</span>
           </div>
         </>
       )}
 
-      {unifiedPrimary ? (
-        <p className="text-xs text-slate-400">
-          {primaryFileName ? `Source: ${primaryFileName}` : ""}
-        </p>
-      ) : null}
+      {unifiedPrimary ? <p className="text-xs text-slate-400">{primaryFileName ? t("editor.source", { name: primaryFileName }) : ""}</p> : null}
     </div>
   );
 }

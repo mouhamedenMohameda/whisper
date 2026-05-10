@@ -21,6 +21,14 @@
     overflow-x: hidden;
   }
 
+  html[lang="ar"] body {
+    font-family: "Cairo", "Inter", ui-sans-serif, system-ui, sans-serif;
+  }
+
+  html[lang="ar"] .font-display {
+    font-family: "Cairo", "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+  }
+
   ::selection {
     @apply bg-brand-500/25 text-slate-900 dark:bg-brand-400/30 dark:text-white;
   }
@@ -135,6 +143,29 @@
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
       @apply bg-white/[0.97] shadow-soft-lg dark:bg-slate-950/[0.97];
+    }
+
+    /* Cartes / footer avec backdrop-blur-* en classe utilitaire (hors .glass-*). */
+    .backdrop-blur-xl,
+    .backdrop-blur-2xl,
+    .backdrop-blur-lg {
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
+    }
+
+    /*
+      Animations continues (blobs, breathe, ping) : très coûteuses sur GPU mobile.
+      Les écrans larges gardent le rendu « premium ».
+    */
+    .motion-safe\:animate-blob-drift,
+    .motion-safe\:animate-blob-drift-reverse,
+    .motion-safe\:animate-breathe {
+      animation: none !important;
+    }
+
+    .motion-safe\:animate-ping {
+      animation: none !important;
+      opacity: 0.35;
     }
   }
 }

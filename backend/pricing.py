@@ -96,6 +96,17 @@ def grant_mru_to_wallet_units(grant_mru: float) -> int:
     return max(1, u)
 
 
+def mru_signed_to_wallet_units_delta(mru: float) -> int:
+    """Delta d’unités portefeuille : MRU > 0 comme un crédit, MRU < 0 comme un retrait (magnitude ≥ 1 unité)."""
+    v = float(mru)
+    if v > 0:
+        return grant_mru_to_wallet_units(v)
+    if v < 0:
+        u = int(round(abs(v) * MRU_WALLET_MICRO))
+        return -max(1, u)
+    raise ValueError("mru must be non-zero")
+
+
 def wallet_units_to_mru_display(units: int) -> float:
     return round(float(units) / float(MRU_WALLET_MICRO), 4)
 

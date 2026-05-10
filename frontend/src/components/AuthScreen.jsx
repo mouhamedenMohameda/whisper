@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import i18n from "../i18n/index.js";
 import { apiUrl, parseJsonResponse } from "../utils/api.js";
 import { setAuthSession } from "../utils/authStorage.js";
 import WhatsAppSupportButton from "./WhatsAppSupportButton.jsx";
@@ -11,17 +13,17 @@ function toast(msg, type = "info") {
 function validateIdentityFields(nniRaw, whatsappRaw) {
   const nni = String(nniRaw || "").replace(/\s/g, "");
   if (!/^\d{10,20}$/.test(nni)) {
-    toast("Le NNI doit contenir uniquement des chiffres (10 à 20 caractères), sans lettres.", "error");
+    toast(i18n.t("auth.nniDigits"), "error");
     return false;
   }
   const wa = String(whatsappRaw || "").trim();
   if (wa.includes("@")) {
-    toast("Le champ WhatsApp attend un numéro de téléphone (ex. +222…), pas une adresse e-mail.", "error");
+    toast(i18n.t("auth.waNotEmail"), "error");
     return false;
   }
   const waDigits = wa.replace(/\D/g, "");
   if (waDigits.length < 8) {
-    toast("Indique un numéro WhatsApp valide avec indicatif pays (au moins 8 chiffres).", "error");
+    toast(i18n.t("auth.waShort"), "error");
     return false;
   }
   return true;
@@ -62,6 +64,7 @@ function PasswordVisibilityIcon({ revealed }) {
 }
 
 function PasswordField({ label, hint, value, onChange, autoComplete, required, minLength }) {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   return (
     <label className="block space-y-1.5">
@@ -78,9 +81,9 @@ function PasswordField({ label, hint, value, onChange, autoComplete, required, m
         />
         <button
           type="button"
-          className="absolute right-2 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+          className="absolute end-2 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
           onClick={() => setVisible((v) => !v)}
-          aria-label={visible ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+          aria-label={visible ? t("auth.hidePassword") : t("auth.showPassword")}
           aria-pressed={visible}
         >
           <PasswordVisibilityIcon revealed={visible} />
@@ -92,6 +95,7 @@ function PasswordField({ label, hint, value, onChange, autoComplete, required, m
 }
 
 export default function AuthScreen({ onAuthed }) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState("login");
   const [busy, setBusy] = useState(false);
 
@@ -120,12 +124,12 @@ export default function AuthScreen({ onAuthed }) {
         body: JSON.stringify({ email: loginEmail.trim(), password: loginPassword }),
       });
       const { ok, data, errorMessage } = await parseJsonResponse(res);
-      if (!ok) throw new Error(errorMessage || "Connexion impossible.");
+      if (!ok) throw new Error(errorMessage || t("auth.loginFail"));
       setAuthSession(data.access_token, data.user);
       onAuthed?.(data);
-      toast("Bienvenue !", "success");
+      toast(t("auth.welcome"), "success");
     } catch (err) {
-      toast(err.message || "Connexion impossible", "error");
+      toast(err.message || t("auth.loginFail"), "error");
     } finally {
       setBusy(false);
     }
@@ -134,7 +138,7 @@ export default function AuthScreen({ onAuthed }) {
   async function submitRegister(e) {
     e.preventDefault();
     if (regPassword !== regPassword2) {
-      toast("Les deux mots de passe ne correspondent pas.", "error");
+      toast(t("auth.passwordMismatch"), "error");
       return;
     }
     if (!validateIdentityFields(regNni, regWa)) return;
@@ -151,12 +155,12 @@ export default function AuthScreen({ onAuthed }) {
         }),
       });
       const { ok, data, errorMessage } = await parseJsonResponse(res);
-      if (!ok) throw new Error(errorMessage || "Création de compte refusée.");
+      if (!ok) throw new Error(errorMessage || t("auth.registerFail"));
       setAuthSession(data.access_token, data.user);
       onAuthed?.(data);
-      toast("Compte créé — tu es connecté.", "success");
+      toast(t("auth.accountCreated"), "success");
     } catch (err) {
-      toast(err.message || "Création de compte refusée", "error");
+      toast(err.message || t("auth.registerFail"), "error");
     } finally {
       setBusy(false);
     }
@@ -165,7 +169,7 @@ export default function AuthScreen({ onAuthed }) {
   async function submitReset(e) {
     e.preventDefault();
     if (rpNew !== rpNew2) {
-      toast("Les deux mots de passe ne correspondent pas.", "error");
+      toast(t("auth.passwordMismatch"), "error");
       return;
     }
     if (!validateIdentityFields(rpNni, rpWa)) return;
@@ -182,8 +186,8 @@ export default function AuthScreen({ onAuthed }) {
         }),
       });
       const { ok, errorMessage } = await parseJsonResponse(res);
-      if (!ok) throw new Error(errorMessage || "Réinitialisation impossible.");
-      toast("Mot de passe mis à jour. Connecte-toi avec ton nouveau mot de passe.", "success");
+      if (!ok) throw new Error(errorMessage || t("auth.resetFail"));
+      toast(t("auth.resetSuccess"), "success");
       setTab("login");
       setLoginEmail(rpEmail.trim());
       setRpNew("");
@@ -192,7 +196,7 @@ export default function AuthScreen({ onAuthed }) {
       setRpWa("");
       setLoginPassword("");
     } catch (err) {
-      toast(err.message || "Réinitialisation refusée — vérifie e-mail, NNI et WhatsApp.", "error");
+      toast(err.message || t("auth.resetFailCheck"), "error");
     } finally {
       setBusy(false);
     }
@@ -217,11 +221,9 @@ export default function AuthScreen({ onAuthed }) {
       <div className="glass-panel rounded-[2rem] border border-white/60 p-8 shadow-soft-lg dark:border-slate-800/90 dark:!bg-slate-900/75">
         <div className="text-center">
           <h1 className="font-display text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-            Accès <span className="text-gradient-brand">LecturAI</span>
+            {t("auth.title")}
           </h1>
-          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-            Identifie-toi pour transcrire et générer des cours sur ce serveur.
-          </p>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{t("auth.subtitle")}</p>
         </div>
 
         <div className="mt-6">
@@ -229,124 +231,78 @@ export default function AuthScreen({ onAuthed }) {
         </div>
 
         <div className="mx-auto mt-8 flex flex-wrap justify-center gap-2 rounded-full border border-slate-200/80 bg-slate-50/90 p-1.5 dark:border-slate-700 dark:bg-slate-950/60">
-          {tabBtn("login", "Connexion")}
-          {tabBtn("register", "Créer un compte")}
-          {tabBtn("reset", "Mot de passe oublié")}
+          {tabBtn("login", t("auth.tabLogin"))}
+          {tabBtn("register", t("auth.tabRegister"))}
+          {tabBtn("reset", t("auth.tabReset"))}
         </div>
 
         {tab === "login" && (
           <form onSubmit={submitLogin} className="mt-8 space-y-4">
-            <Field label="E-mail" type="email" autoComplete="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} required />
-            <PasswordField
-              label="Mot de passe"
-              autoComplete="current-password"
-              value={loginPassword}
-              onChange={(e) => setLoginPassword(e.target.value)}
-              required
-            />
+            <Field label={t("auth.email")} type="email" autoComplete="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} required />
+            <PasswordField label={t("auth.password")} autoComplete="current-password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} required />
             <button
               type="submit"
               disabled={busy}
               className="mt-2 w-full rounded-2xl bg-gradient-to-r from-brand-600 via-brand-500 to-violet-600 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Se connecter
+              {t("auth.submitLogin")}
             </button>
           </form>
         )}
 
         {tab === "register" && (
           <form onSubmit={submitRegister} className="mt-8 space-y-4">
-            <Field label="E-mail" type="email" autoComplete="email" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} required />
+            <Field label={t("auth.email")} type="email" autoComplete="email" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} required />
             <Field
-              label="NNI"
+              label={t("auth.nniLabel")}
               autoComplete="off"
               inputMode="numeric"
               value={regNni}
               onChange={(e) => setRegNni(e.target.value)}
               required
-              hint="Numéro national d’identification (chiffres uniquement)."
+              hint={t("auth.nniHint")}
             />
             <Field
-              label="WhatsApp"
+              label={t("auth.whatsapp")}
               autoComplete="tel"
               placeholder="+222 ..."
               value={regWa}
               onChange={(e) => setRegWa(e.target.value)}
               required
-              hint="Ton numéro tel qu’enregistré : il sera redemandé tel quel si tu dois changer ton mot de passe."
+              hint={t("auth.waHint")}
             />
-            <PasswordField
-              label="Mot de passe (min. 8 caractères)"
-              autoComplete="new-password"
-              value={regPassword}
-              onChange={(e) => setRegPassword(e.target.value)}
-              required
-              minLength={8}
-            />
-            <PasswordField
-              label="Confirmer le mot de passe"
-              autoComplete="new-password"
-              value={regPassword2}
-              onChange={(e) => setRegPassword2(e.target.value)}
-              required
-              minLength={8}
-            />
-            <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-500">
-              Pour un nouveau mot de passe plus tard : tu réécriras ton e-mail, ton NNI et ce numéro WhatsApp — aucun message automatique n’est envoyé.
-            </p>
+            <PasswordField label={t("auth.passwordMin")} autoComplete="new-password" value={regPassword} onChange={(e) => setRegPassword(e.target.value)} required minLength={8} />
+            <PasswordField label={t("auth.confirmPassword")} autoComplete="new-password" value={regPassword2} onChange={(e) => setRegPassword2(e.target.value)} required minLength={8} />
+            <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-500">{t("auth.registerNote")}</p>
             <button
               type="submit"
               disabled={busy}
               className="w-full rounded-2xl bg-gradient-to-r from-brand-600 via-brand-500 to-violet-600 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-105 disabled:opacity-50"
             >
-              Créer mon compte
+              {t("auth.createAccount")}
             </button>
           </form>
         )}
 
         {tab === "reset" && (
           <div className="mt-8 space-y-4">
-            <p className="text-center text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-              Saisis exactement les mêmes <strong className="text-slate-800 dark:text-slate-200">e-mail</strong>,{" "}
-              <strong className="text-slate-800 dark:text-slate-200">NNI</strong> et{" "}
-              <strong className="text-slate-800 dark:text-slate-200">numéro WhatsApp</strong> que lors de l&apos;inscription,
-              puis ton nouveau mot de passe. Aucun message automatique : on vérifie ton identité uniquement avec ces trois
-              éléments.
-            </p>
+            <p className="text-center text-xs leading-relaxed text-slate-600 dark:text-slate-400">{t("auth.resetIntro")}</p>
             <form onSubmit={submitReset} className="space-y-3">
-              <Field label="E-mail du compte" type="email" autoComplete="email" value={rpEmail} onChange={(e) => setRpEmail(e.target.value)} required />
-              <Field label="NNI (re-saisie)" inputMode="numeric" autoComplete="off" value={rpNni} onChange={(e) => setRpNni(e.target.value)} required hint="Les mêmes chiffres qu’à l’inscription." />
+              <Field label={t("auth.resetEmail")} type="email" autoComplete="email" value={rpEmail} onChange={(e) => setRpEmail(e.target.value)} required />
+              <Field label={t("auth.resetNni")} inputMode="numeric" autoComplete="off" value={rpNni} onChange={(e) => setRpNni(e.target.value)} required hint={t("auth.resetNniHint")} />
               <Field
-                label="WhatsApp (re-saisie)"
+                label={t("auth.resetWa")}
                 placeholder="+222 …"
                 autoComplete="tel"
                 value={rpWa}
                 onChange={(e) => setRpWa(e.target.value)}
                 required
-                hint="Strictement le même format / numéro qu’à l’inscription."
+                hint={t("auth.resetWaHint")}
               />
-              <PasswordField
-                label="Nouveau mot de passe (min. 8)"
-                autoComplete="new-password"
-                value={rpNew}
-                onChange={(e) => setRpNew(e.target.value)}
-                required
-                minLength={8}
-              />
-              <PasswordField
-                label="Confirmer le mot de passe"
-                autoComplete="new-password"
-                value={rpNew2}
-                onChange={(e) => setRpNew2(e.target.value)}
-                required
-                minLength={8}
-              />
-              <button
-                type="submit"
-                disabled={busy}
-                className="w-full rounded-2xl bg-gradient-to-r from-brand-600 via-brand-500 to-violet-600 py-3.5 text-sm font-bold text-white shadow-glow transition disabled:opacity-50"
-              >
-                Valider — nouveau mot de passe
+              <PasswordField label={t("auth.newPasswordMin")} autoComplete="new-password" value={rpNew} onChange={(e) => setRpNew(e.target.value)} required minLength={8} />
+              <PasswordField label={t("auth.confirmPassword")} autoComplete="new-password" value={rpNew2} onChange={(e) => setRpNew2(e.target.value)} required minLength={8} />
+              <button type="submit" disabled={busy} className="w-full rounded-2xl bg-gradient-to-r from-brand-600 via-brand-500 to-violet-600 py-3.5 text-sm font-bold text-white shadow-glow transition disabled:opacity-50">
+                {t("auth.resetSubmit")}
               </button>
             </form>
           </div>

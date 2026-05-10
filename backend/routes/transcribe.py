@@ -1933,19 +1933,19 @@ async def transcribe_audio(
         logger.error("OpenAI AuthenticationError sur /transcribe.", exc_info=False)
         raise HTTPException(
             status_code=500,
-            detail="Authentification refusée par OpenAI pour la transcription. Vérifier OPENAI_API_KEY sur le serveur.",
+            detail="Service de transcription indisponible (configuration serveur). Réessaie plus tard.",
         )
     except openai.RateLimitError:
         logger.warning("OpenAI RateLimitError sur /transcribe.")
         raise HTTPException(
             status_code=429,
-            detail="Trop de requêtes sur OpenAI pour la transcription. Réessaie dans une minute environ.",
+            detail="Trop de demandes en ce moment — réessaie dans environ une minute.",
         ) from None
     except openai.APIConnectionError:
         logger.warning("OpenAI APIConnectionError sur /transcribe.", exc_info=True)
         raise HTTPException(
             status_code=503,
-            detail="Connexion impossible avec le service OpenAI pour la transcription. Réessaie plus tard.",
+            detail="Connexion au service de transcription impossible. Réessaie plus tard.",
         ) from None
     except openai.APIStatusError as e:
         resp_text = ""
@@ -1962,29 +1962,19 @@ async def transcribe_audio(
             sc,
             resp_text[:240],
         )
-        detail = (
-            "La transcription a été refusée par OpenAI pour ce fichier. "
-            "Vérifie le format réel du média ou réessaie."
-        )
+        detail = "La transcription de ce fichier a été refusée. Vérifie le format (MP3 ou M4A recommandés) ou réessaie."
         if sc in (413, 400):
-            detail = (
-                "Fichier refusé par OpenAI pour la transcription "
-                "(souvent : taille > ~25 Mo avec whisper-1, ou format audio peu supporté). Réduire la taille ou réencoder en MP3/M4A léger aide souvent."
-            )
+            detail = "Fichier refusé (souvent : segment trop lourd ou format peu supporté). Réduis la taille ou réencode en MP3/M4A."
         elif "size" in low or ("file" in low and "large" in low) or ("25" in resp_text.lower() and "mb" in low):
-            detail = (
-                "Fichier trop volumineux pour l’API Whisper d’OpenAI dans cette configuration. Réduire à environ 25 Mo ou moins, ou segmenter."
-            )
+            detail = "Un segment du fichier est encore trop volumineux. Réduis la taille totale ou exporte en MP3/M4A plus léger."
         elif sc == 415 or "unsupported" in low or "mime" in low:
-            detail = "Format audio peu ou non reconnu par OpenAI. Réencode en MP3 ou M4A (audio uniquement)."
-        elif resp_text.strip() and len(resp_text.strip()) <= 380:
-            detail = f"Détail renvoyé par OpenAI : {resp_text.strip()}"
+            detail = "Format audio peu reconnu — réencode en MP3 ou M4A (audio uniquement)."
         raise HTTPException(status_code=502 if sc >= 500 else 400 if sc < 500 else 502, detail=detail) from None
-    except openai.OpenAIError as e:
+    except openai.OpenAIError:
         logger.exception("OpenAI erreur générique transcription", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Erreur de transcription ({type(e).__name__}). Vérifie le fichier puis réessaie ; si ça persiste, consulter les journaux serveur.",
+            detail="La transcription a échoué. Vérifie le fichier puis réessaie ; si ça persiste, réessaie plus tard.",
         )
     finally:
         _cleanup_transcription_tempfiles(
@@ -1995,6 +1985,7 @@ async def transcribe_audio(
 
 
 def _ndjson_detail_for_openai_status(e: openai.APIStatusError) -> str:
+    """Message affiché à l’utilisateur final (pas de nom de fournisseur ni jargon interne)."""
     resp_text = ""
     try:
         r = getattr(e, "response", None)
@@ -2004,23 +1995,13 @@ def _ndjson_detail_for_openai_status(e: openai.APIStatusError) -> str:
         resp_text = ""
     low = resp_text.lower()
     sc = getattr(e, "status_code", None) or 0
-    detail = (
-        "La transcription a été refusée par OpenAI pour ce fichier. "
-        "Vérifie le format réel du média ou réessaie."
-    )
+    detail = "La transcription de ce fichier a été refusée. Vérifie le format (MP3 ou M4A recommandés) ou réessaie."
     if sc in (413, 400):
-        detail = (
-            "Fichier refusé par OpenAI pour la transcription "
-            "(souvent : taille > ~25 Mo avec whisper-1, ou format audio peu supporté). Réduire la taille ou réencoder en MP3/M4A léger aide souvent."
-        )
+        detail = "Fichier refusé (souvent : segment trop lourd ou format peu supporté). Réduis la taille ou réencode en MP3/M4A."
     elif "size" in low or ("file" in low and "large" in low) or ("25" in resp_text.lower() and "mb" in low):
-        detail = (
-            "Fichier trop volumineux pour l’API Whisper d’OpenAI dans cette configuration. Réduire à environ 25 Mo ou moins, ou segmenter."
-        )
+        detail = "Un segment du fichier est encore trop volumineux. Réduis la taille totale ou exporte en MP3/M4A plus léger."
     elif sc == 415 or "unsupported" in low or "mime" in low:
-        detail = "Format audio peu ou non reconnu par OpenAI. Réencode en MP3 ou M4A (audio uniquement)."
-    elif resp_text.strip() and len(resp_text.strip()) <= 380:
-        detail = f"Détail renvoyé par OpenAI : {resp_text.strip()}"
+        detail = "Format audio peu reconnu — réencode en MP3 ou M4A (audio uniquement)."
     return detail
 
 
@@ -2042,7 +2023,7 @@ async def iterate_transcription_events(
     }
 
     estimated = ctx["estimated"]
-    prep_msg = "Prétraitement audio (normalisation / découpage FFmpeg si besoin)."
+    prep_msg = "Préparation de l’audio sur le serveur (normalisation, découpage si nécessaire)…"
     yield {
         "type": "status",
         "phase": "preprocessing",
@@ -2064,7 +2045,7 @@ async def iterate_transcription_events(
             yield {
                 "type": "status",
                 "phase": "whisper_chunk",
-                "message": f"Transcription segment {idx + 1}/{n_chunks} (découpage automatique)…",
+                "message": f"Transcription en cours — partie {idx + 1}/{n_chunks}…",
                 "server_frac": round(0.10 + 0.50 * (idx / max(1, n_chunks)), 4),
                 "whisper_chunk_index": idx + 1,
                 "whisper_chunk_total": n_chunks,
@@ -2095,14 +2076,14 @@ async def iterate_transcription_events(
                 "type": "status",
                 "phase": "whisper",
                 "message": (
-                    f"Whisper OpenAI — segment {idx + 1}/{n_chunks}…"
+                    f"Écoute et transcription — partie {idx + 1}/{n_chunks}…"
                     if n_chunks > 1
-                    else "Transcription Whisper côté OpenAI…"
+                    else "Écoute et transcription de l’audio…"
                 ),
                 "estimate_note": (
-                    f"Progression estimée (≈ {expected_whisper_total:.0f}s au total, facteur {whisper_rt})."
+                    f"Temps restant estimé ≈ {expected_whisper_total:.0f}s."
                     if n_chunks == 1
-                    else f"Segment {idx + 1}/{n_chunks} · temps total estimé ≈ {expected_whisper_total:.0f}s."
+                    else f"Partie {idx + 1}/{n_chunks} · durée totale estimée ≈ {expected_whisper_total:.0f}s."
                 ),
                 "server_frac": round(server_frac, 4),
                 "whisper_elapsed_sec": round(elapsed_wh, 1),
@@ -2114,15 +2095,15 @@ async def iterate_transcription_events(
             r_part = task.result()
         except openai.AuthenticationError:
             logger.error("OpenAI AuthenticationError sur /transcribe-stream.", exc_info=False)
-            yield {"type": "error", "detail": "Authentification refusée par OpenAI pour la transcription. Vérifier OPENAI_API_KEY sur le serveur."}
+            yield {"type": "error", "detail": "Service de transcription indisponible (configuration serveur). Réessaie plus tard."}
             return
         except openai.RateLimitError:
             logger.warning("OpenAI RateLimitError sur /transcribe-stream.")
-            yield {"type": "error", "detail": "Trop de requêtes sur OpenAI pour la transcription. Réessaie dans une minute environ."}
+            yield {"type": "error", "detail": "Trop de demandes en ce moment — réessaie dans environ une minute."}
             return
         except openai.APIConnectionError:
             logger.warning("OpenAI APIConnectionError sur /transcribe-stream.", exc_info=True)
-            yield {"type": "error", "detail": "Connexion impossible avec le service OpenAI pour la transcription. Réessaie plus tard."}
+            yield {"type": "error", "detail": "Connexion au service de transcription impossible. Réessaie plus tard."}
             return
         except openai.APIStatusError as e:
             sc = getattr(e, "status_code", None) or 0
@@ -2133,10 +2114,7 @@ async def iterate_transcription_events(
             logger.exception("OpenAI erreur générique transcription stream", exc_info=True)
             yield {
                 "type": "error",
-                "detail": (
-                    f"Erreur de transcription ({type(e).__name__}). "
-                    "Vérifie le fichier puis réessaie ; si ça persiste, consulter les journaux serveur."
-                ),
+                "detail": "La transcription a échoué — vérifie le fichier et réessaie plus tard.",
             }
             return
 
@@ -2145,7 +2123,7 @@ async def iterate_transcription_events(
 
     response = _merge_whisper_verbose_responses(responses_acc, offsets_acc)
 
-    yield {"type": "status", "phase": "whisper_complete", "message": "Whisper a terminé.", "server_frac": 0.68}
+    yield {"type": "status", "phase": "whisper_complete", "message": "Transcription audio terminée.", "server_frac": 0.68}
 
     api_text_preview = (getattr(response, "text", None) or "").strip()
     if len(api_text_preview) > 1600:
@@ -2167,19 +2145,19 @@ async def iterate_transcription_events(
             whisper_chunk_count=len(ctx["whisper_chunks"]),
         )
     except openai.AuthenticationError:
-        yield {"type": "error", "detail": "Authentification refusée par OpenAI lors de la finalisation. Vérifier OPENAI_API_KEY sur le serveur."}
+        yield {"type": "error", "detail": "Impossible de finaliser la transcription (service indisponible). Réessaie plus tard."}
         return
     except openai.RateLimitError:
-        yield {"type": "error", "detail": "Limite OpenAI pendant la finalisation. Réessaie dans une minute."}
+        yield {"type": "error", "detail": "Limite d’usage atteinte pendant la finalisation — réessaie dans une minute."}
         return
     except openai.APIConnectionError:
-        yield {"type": "error", "detail": "Connexion OpenAI impossible pendant la finalisation."}
+        yield {"type": "error", "detail": "Connexion impossible pendant la finalisation — réessaie plus tard."}
         return
     except openai.APIStatusError as e:
         yield {"type": "error", "detail": _ndjson_detail_for_openai_status(e)}
         return
-    except openai.OpenAIError as e:
-        yield {"type": "error", "detail": f"Erreur lors de la finalisation ({type(e).__name__}). Réessaie plus tard."}
+    except openai.OpenAIError:
+        yield {"type": "error", "detail": "Erreur lors de la finalisation — réessaie dans un instant."}
         return
     except HTTPException as http_exc:
         raw_d = http_exc.detail
@@ -2254,7 +2232,7 @@ async def transcribe_audio_stream(
                 {
                     "type": "status",
                     "phase": "preprocessing",
-                    "message": "Prétraitement audio (FFmpeg) — garde cet onglet ouvert…",
+                    "message": "Préparation de l’audio — merci de garder cet onglet ouvert…",
                     "server_frac": 0.06,
                 },
             )
@@ -2283,7 +2261,7 @@ async def transcribe_audio_stream(
                     {
                         "type": "status",
                         "phase": "preprocessing",
-                        "message": "Conversion / analyse audio toujours en cours sur le serveur…",
+                        "message": "Analyse de l’audio toujours en cours sur le serveur…",
                         "server_frac": 0.07,
                     },
                 )
