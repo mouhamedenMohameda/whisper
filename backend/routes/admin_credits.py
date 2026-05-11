@@ -4,7 +4,7 @@ from datetime import timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
@@ -172,6 +172,53 @@ def _grant_response_payload(usr: User, *, add_units: int, mru_nominal: float) ->
         "mru_per_usd": MRU_PER_USD,
         "customer_margin_multiplier": MARGIN_MULTIPLIER,
         "credits_expire_at": usr.credits_expire_at.isoformat() if usr.credits_expire_at else None,
+    }
+
+
+def _admin_user_summary(u: User) -> dict:
+    return {
+        "id": u.id,
+        "email": u.email,
+        "is_admin": bool(u.is_admin),
+        "credit_balance": u.credit_balance,
+        "balance_mru_approx": wallet_units_to_mru_display(u.credit_balance),
+        "credits_expire_at": u.credits_expire_at.isoformat() if u.credits_expire_at else None,
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+    }
+
+
+@router.get("/admin/users")
+def admin_list_users(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    q: str = "",
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin_user),
+):
+    """Liste paginée de tous les comptes ; ``q`` (optionnel) filtre par sous-chaîne d’e-mail (min. 2 caractères)."""
+    needle = "".join(ch for ch in (q or "").strip().lower() if ch.isprintable()).strip()
+    if len(needle) > 120:
+        needle = needle[:120]
+
+    filters = []
+    if len(needle) >= 2:
+        filters.append(func.instr(func.lower(User.email), needle) > 0)
+
+    count_stmt = select(func.count(User.id))
+    if filters:
+        count_stmt = count_stmt.where(*filters)
+    total = int(db.scalar(count_stmt) or 0)
+
+    list_stmt = select(User).order_by(User.email.asc()).offset(offset).limit(limit)
+    if filters:
+        list_stmt = list_stmt.where(*filters)
+    rows = db.execute(list_stmt).scalars().all()
+
+    return {
+        "users": [_admin_user_summary(u) for u in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
 
 

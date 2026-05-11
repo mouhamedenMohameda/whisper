@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { ENGINE_COURSE, ENGINE_TRANSCRIPTION } from "../branding.js";
+import {
+  ENGINE_COURSE,
+  ENGINE_TRANSCRIBE_ATELIER,
+  ENGINE_TRANSCRIBE_CLOUD,
+  ENGINE_TRANSCRIPTION,
+} from "../branding.js";
 
 /** Extensions audio uniquement (pas vidéo PDF image). */
 const AUDIO_EXTENSIONS = new Set([
@@ -114,6 +119,8 @@ export default function UploadZone({
   onSubjectChange,
   speechLanguage = "fr",
   onSpeechLanguageChange,
+  transcriptionEngine = "openai",
+  onTranscriptionEngineChange,
   onSubmit,
   disabled,
   batchProgress,
@@ -404,6 +411,42 @@ export default function UploadZone({
                   checked={speechLanguage === opt.id}
                   disabled={disabled}
                   onChange={() => typeof onSpeechLanguageChange === "function" && onSpeechLanguageChange(/** @type {"fr"|"ar"} */ (opt.id))}
+                  value={opt.id}
+                />
+                {opt.label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-bold text-slate-800 dark:text-slate-200">{t("upload.fieldsetEngine")}</legend>
+          <p className="text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+            {t("upload.engineHint", { cloud: ENGINE_TRANSCRIBE_CLOUD, desk: ENGINE_TRANSCRIBE_ATELIER })}
+          </p>
+          <div className="flex flex-wrap gap-2" role="group" aria-label={t("upload.engineGroupAria")}>
+            {[
+              { id: "openai", label: ENGINE_TRANSCRIBE_CLOUD },
+              { id: "local", label: ENGINE_TRANSCRIBE_ATELIER },
+            ].map((opt) => (
+              <label
+                key={opt.id}
+                className={`flex cursor-pointer items-center gap-2 rounded-2xl border px-4 py-2.5 text-xs font-bold transition sm:text-sm ${
+                  transcriptionEngine === opt.id
+                    ? "border-brand-500 bg-brand-500/10 text-brand-900 shadow-inner dark:border-brand-400 dark:bg-brand-950/45 dark:text-brand-100"
+                    : "border-slate-200/90 bg-white/70 text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-950/60 dark:text-slate-200"
+                }`}
+              >
+                <input
+                  type="radio"
+                  className="sr-only"
+                  name="transcription-engine"
+                  checked={transcriptionEngine === opt.id}
+                  disabled={disabled}
+                  onChange={() =>
+                    typeof onTranscriptionEngineChange === "function" &&
+                    onTranscriptionEngineChange(/** @type {"openai"|"local"} */ (opt.id))
+                  }
                   value={opt.id}
                 />
                 {opt.label}

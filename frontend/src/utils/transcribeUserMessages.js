@@ -6,8 +6,11 @@
 export function userFacingTranscriptionJobFailure(errorDetail, message, t) {
   const d = typeof errorDetail === "string" ? errorDetail.trim() : "";
   const m = typeof message === "string" ? message.trim() : "";
+  const blob = d + m;
   const technical =
-    /openai|whisper|ffmpeg|api_key|apikey|status_code|traceback|exception|uvicorn|internal/i.test(d + m);
+    /openai|whisper|ffmpeg|api_key|apikey|status_code|traceback|exception|uvicorn|internal|torch\.|pytorch|\bcuda\b|\bmps\b|autograd|in_features\s*=|out_features\s*=|\bbias\s*=\s*true\b|torch\.nn|nn\.parameter|linear\s*\(\s*in_features/i.test(
+      blob,
+    );
   if (technical) {
     return t("bgJobs.failedGeneric");
   }

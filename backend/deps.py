@@ -52,11 +52,21 @@ def require_user(
 
 def require_wallet_user(
     db: Annotated[Session, Depends(get_db)],
-    user: Annotated[Optional[User], Depends(require_user)],
+    user: Annotated[Optional[User], Depends(get_current_user_optional)],
 ) -> Optional[User]:
-    """Connexion obligatoire + solde et date de validité suffisants (ignoré si AUTH_REQUIRED désactivée)."""
+    """Connexion + portefeuille si AUTH_REQUIRED ; sinon utilisateur optionnel (JWT si présent).
+
+    Important : avec AUTH_REQUIRED=false, l’ancienne chaîne passait par ``require_user`` qui renvoyait
+    toujours ``None`` → ``debit_credits`` ne débitait jamais (transcription / cours / export gratuits par erreur).
+    Ici on lit le JWT optionnel pour pouvoir facturer un compte connecté même en mode sans garde-fou global.
+    """
     if not auth_required():
         return user
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Connexion requise — connecte-toi pour utiliser cet outil.",
+        )
     return assert_wallet_can_use(db, user)
 
 

@@ -1,19 +1,24 @@
 from __future__ import annotations
 
+import logging
 import os
-from typing import Annotated, Optional
+from typing import Annotated, Any, Optional
 
-import anthropic
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from groq import APIError
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from course_from_transcript import run_course_pipeline
+from groq_errors import http_detail_for_groq_api_error
 from credits_wallet import debit_credits
 from database import get_db
 from deps import require_wallet_user
 from models import User
-from pricing import billed_mru_to_wallet_units_debit, claude_billed, wallet_units_to_mru_display
+from pricing import billed_mru_to_wallet_units_debit, groq_billed, wallet_units_to_mru_display
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -55,7 +60,7 @@ Given the transcript below, produce a lesson with these sections:
 ## 8. WHAT TO REVIEW NEXT
    3 topics the student should explore to go deeper.
 
-Write in the same language as the transcript.
+Write in the language requested by the user when provided; otherwise, write in the same language as the transcript.
 Be clear, pedagogical, and student-friendly.
 Use markdown formatting throughout."""
 
@@ -63,6 +68,18 @@ Use markdown formatting throughout."""
 class GenerateRequest(BaseModel):
     transcript: str
     subject: str = "General"
+    language: Optional[str] = Field(
+        default=None,
+        description="Langue de sortie souhaitée (UI) : 'fr' par défaut, 'ar' si sélectionné.",
+    )
+    transcript_mixed_view: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Repli : blocs + whisper_reliability si asr_passages_annotated absent.",
+    )
+    asr_passages_annotated: Optional[list[Any]] = Field(
+        default=None,
+        description="Passages Whisper avec reliability (réponse /transcribe) — entrée canonique du collage.",
+    )
 
 
 @router.post("/generate")
@@ -71,65 +88,104 @@ async def generate_lesson(
     db: Annotated[Session, Depends(get_db)],
     _auth: Annotated[Optional[User], Depends(require_wallet_user)],
 ):
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = (os.getenv("GROQ_API_KEY") or "").strip()
     if not api_key:
         raise HTTPException(
             status_code=500,
-            detail="La clé technique de génération de cours est manquante sur le serveur.",
+            detail="La clé technique du moteur de cours est manquante sur le serveur (variable d’environnement).",
         )
 
     if not req.transcript or len(req.transcript.strip()) < 50:
         raise HTTPException(status_code=400, detail="Transcript too short to generate a lesson.")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    model = (os.getenv("GROQ_GENERATE_MODEL") or "").strip() or "llama-3.3-70b-versatile"
+    try:
+        max_tokens = int((os.getenv("GROQ_GENERATE_MAX_TOKENS") or "8192").strip())
+    except ValueError:
+        max_tokens = 8192
+    max_tokens = max(256, min(max_tokens, 32768))
 
-    user_message = f"""Subject: {req.subject}
-
-TRANSCRIPT:
-{req.transcript}
-
-Please generate a complete, structured lesson from this lecture transcript."""
+    target_lang = "ar" if (req.language or "").strip().lower().startswith("ar") else "fr"
+    lang_name = "Arabic" if target_lang == "ar" else "French"
+    expl_label = "تفسير" if target_lang == "ar" else "Explication"
+    lesson_system_prompt = (
+        LESSON_SYSTEM_PROMPT
+        + f"\n\nIMPORTANT: Write the entire lesson in {lang_name} (no English). "
+        + "For the quiz section, keep options labeled exactly A) B) C) D) (Latin letters), "
+        + "mark the correct choice with ✅, and prefix each answer explanation with "
+        + f"'{expl_label}:'."
+    )
 
     try:
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=8192,
-            system=LESSON_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}],
+        lesson_markdown, inp, out, pipeline_meta = run_course_pipeline(
+            api_key=api_key,
+            subject=req.subject,
+            transcript=req.transcript,
+            asr_passages_annotated=req.asr_passages_annotated,
+            transcript_mixed_view=req.transcript_mixed_view,
+            lesson_system_prompt=lesson_system_prompt,
+            model=model,
+            max_tokens_lesson=max_tokens,
         )
-        lesson_markdown = message.content[0].text
-
-        inp = message.usage.input_tokens
-        out = message.usage.output_tokens
-        claude_usd, claude_mru = claude_billed(inp, out)
-
-        payload = {
-            "lesson": lesson_markdown,
-            "subject": req.subject,
-            "input_tokens": inp,
-            "output_tokens": out,
-            "usage": {
-                "claude_input_tokens": inp,
-                "claude_output_tokens": out,
-                "claude_total_tokens": inp + out,
-                "provider_usd_claude": round(claude_usd, 8),
-                "billed_mru_claude": round(claude_mru, 6),
-            },
-        }
-        charge_units = billed_mru_to_wallet_units_debit(claude_mru)
-        new_bal, charged = debit_credits(db, _auth, charge_units)
-        if new_bal is not None:
-            payload["wallet"] = {
-                "balance_units": new_bal,
-                "spent_units": charged,
-                "balance_mru": wallet_units_to_mru_display(new_bal),
-                "spent_mru_this_request": wallet_units_to_mru_display(charged),
-            }
-            payload["credits"] = payload["wallet"]
-        return JSONResponse(payload)
-
-    except anthropic.APIError:
+    except APIError as e:
+        body = getattr(e, "body", None)
+        logger.warning("Groq /generate pipeline APIError message=%s body=%s", e, body)
+        raise HTTPException(status_code=502, detail=http_detail_for_groq_api_error(e)) from None
+    except ValueError as e:
+        if str(e).strip() == "missing_asr_annotations":
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Annotations ASR manquantes : renvoie `asr_passages_annotated` (réponse transcription) "
+                    "ou `transcript_mixed_view` avec blocs `whisper_reliability`. "
+                    "Relance une transcription avec l’app à jour, ou recharge la session depuis l’historique."
+                ),
+            ) from None
+        if str(e).strip() == "empty_lesson":
+            logger.warning("Groq /generate: modèle a renvoyé un cours vide après collage + génération.")
+            raise HTTPException(
+                status_code=502,
+                detail="Le modèle a renvoyé un cours vide. Réessaie ; si ça persiste, raccourcis le transcript ou ajuste GROQ_GENERATE_MODEL.",
+            ) from None
+        logger.warning("Groq /generate pipeline ValueError: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="La génération du cours n'a pas pu aboutir. Réessaie dans quelques instants.",
         ) from None
+
+    groq_usd, groq_mru = groq_billed(inp, out)
+
+    charge_units = billed_mru_to_wallet_units_debit(groq_mru)
+    new_bal, charged = debit_credits(db, _auth, charge_units)
+
+    payload = {
+        "lesson": lesson_markdown,
+        "subject": req.subject,
+        "input_tokens": inp,
+        "output_tokens": out,
+        "generation_pipeline": pipeline_meta,
+        "usage": {
+            "groq_input_tokens": inp,
+            "groq_output_tokens": out,
+            "groq_total_tokens": inp + out,
+            "provider_usd_groq": float(groq_usd),
+            "billed_mru_groq": float(groq_mru),
+            "debit_wallet_units": int(charged),
+        },
+    }
+    if groq_mru > 0 and charged <= 0:
+        logger.warning(
+            "/api/generate: coût cours estimé %.6f MRU mais débit portefeuille = 0 (user=%s, units=%s).",
+            groq_mru,
+            _auth.id if _auth else None,
+            charge_units,
+        )
+    if new_bal is not None:
+        payload["wallet"] = {
+            "balance_units": new_bal,
+            "spent_units": charged,
+            "balance_mru": wallet_units_to_mru_display(new_bal),
+            "spent_mru_this_request": wallet_units_to_mru_display(charged),
+        }
+        payload["credits"] = payload["wallet"]
+    return JSONResponse(payload)

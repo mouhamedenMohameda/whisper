@@ -1,19 +1,22 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import shutil
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, AsyncIterator, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from credits_wallet import credit_credits, debit_credits
 from database import SessionLocal, get_db
 from deps import auth_required, require_wallet_user
 from models import TranscriptionJob, User
@@ -22,6 +25,70 @@ from routes import transcribe as tr
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["transcribe-jobs"])
+
+_job_slot_sem: Optional[asyncio.Semaphore] = None
+_job_slot_capacity: Optional[int] = None
+
+
+def init_transcribe_job_slots() -> None:
+    """
+    À appeler une fois au démarrage (lifespan FastAPI).
+
+    TRANSCRIBE_JOB_MAX_CONCURRENT (défaut 2) : nombre maximal de jobs /transcribe-jobs dont
+    l’étape Whisper+FFmpeg peut s’exécuter à la fois **dans ce processus uvicorn**.
+
+    0 ou « unlimited » → pas de limite (comme avant ; déconseillé en prod sous charge locale).
+
+    Avec plusieurs workers uvicorn (``--workers N``), la capacité réelle ≈ ``N ×`` cette valeur.
+    """
+    global _job_slot_sem, _job_slot_capacity
+    raw = (os.getenv("TRANSCRIBE_JOB_MAX_CONCURRENT") or "2").strip().lower()
+    if raw in ("0", "unlimited", "none", "off"):
+        _job_slot_sem = None
+        _job_slot_capacity = None
+        logger.info("TRANSCRIBE_JOB_MAX_CONCURRENT désactivée — aucune limite intra-process.")
+        return
+    try:
+        n = int(raw)
+    except ValueError:
+        logger.warning(
+            "TRANSCRIBE_JOB_MAX_CONCURRENT invalide (%r), utilisation du défaut 2.",
+            os.getenv("TRANSCRIBE_JOB_MAX_CONCURRENT"),
+        )
+        n = 2
+    n = max(1, min(n, 64))
+    _job_slot_sem = asyncio.Semaphore(n)
+    _job_slot_capacity = n
+    logger.info(
+        "File jobs transcription — au plus %s job(s) lourd(s) en parallèle (ce process uvicorn).",
+        n,
+    )
+
+
+def get_transcription_job_slot_capacity() -> Optional[int]:
+    """Valeur entière configurée, ou ``None`` si illimitée. Exposée via /api/health."""
+    return _job_slot_capacity
+
+
+def reset_transcribe_job_slots_for_tests() -> None:
+    """Réinitialise le sémaphore (tests uniquement)."""
+    global _job_slot_sem, _job_slot_capacity
+    _job_slot_sem = None
+    _job_slot_capacity = None
+
+
+@asynccontextmanager
+async def transcription_job_execution_slot() -> AsyncIterator[None]:
+    """Limite globale intra-process avant marquage ``processing`` + travail Whisper."""
+    sem = _job_slot_sem
+    if sem is None:
+        yield
+        return
+    await sem.acquire()
+    try:
+        yield
+    finally:
+        sem.release()
 
 _DATA = Path(__file__).resolve().parent.parent / "data"
 
@@ -33,15 +100,38 @@ def _job_root(public_id: str) -> Path:
 def _detail_to_plain_str(detail: Any) -> str:
     if isinstance(detail, str):
         s = detail.strip()
-        return s if s else "Erreur inconnue."
-    return str(detail)
+        base = s if s else "Erreur inconnue."
+    else:
+        base = str(detail).strip() or "Erreur inconnue."
+    return tr.sanitize_user_visible_transcription_detail(base)
 
 
 def _purge_job_workspace(public_id: str) -> None:
     shutil.rmtree(_job_root(public_id), ignore_errors=True)
 
 
+def _release_job_wallet_hold(db: Session, job: TranscriptionJob, auth_user: Optional[User]) -> None:
+    """Recrédite la réserve si le job échoue / est interrompu avant facturation finale."""
+    if auth_user is None or job is None:
+        return
+    try:
+        reserved = int(getattr(job, "wallet_reserved_units", 0) or 0)
+    except (TypeError, ValueError):
+        reserved = 0
+    if reserved <= 0:
+        return
+    credit_credits(db, auth_user, reserved)
+    job.wallet_reserved_units = 0
+    db.add(job)
+    db.commit()
+
+
 async def execute_transcription_job(job_public_id: str) -> None:
+    async with transcription_job_execution_slot():
+        await _execute_transcription_job_after_slot(job_public_id)
+
+
+async def _execute_transcription_job_after_slot(job_public_id: str) -> None:
     whisper_rt = float(os.getenv("WHISPER_PROGRESS_RT_FACTOR", "0.5"))
     ctx: Optional[dict[str, Any]] = None
     db = SessionLocal()
@@ -52,7 +142,7 @@ async def execute_transcription_job(job_public_id: str) -> None:
         claimed = db.execute(
             update(TranscriptionJob)
             .where(TranscriptionJob.public_id == job_public_id, TranscriptionJob.status == "queued")
-            .values(status="processing"),
+            .values(status="processing", phase="running", progress_percent=2),
         )
         db.commit()
         if claimed.rowcount == 0:
@@ -63,6 +153,8 @@ async def execute_transcription_job(job_public_id: str) -> None:
         if job is None:
             logger.warning("TranscriptionJob introuvable après claim public_id=%s", job_public_id)
             return
+
+        job_ui_loc = tr._normalize_ui_locale(getattr(job, "ui_locale", None))
 
         inp = (_DATA / job.input_relpath).resolve()
         if not inp.is_file():
@@ -77,6 +169,7 @@ async def execute_transcription_job(job_public_id: str) -> None:
                 job.original_filename,
                 job.subject or "General",
                 job.speech_language or "fr",
+                transcription_engine_in=getattr(job, "transcription_engine", None) or "openai",
                 hint_content_type=job.client_content_type,
             )
         except HTTPException as e:
@@ -90,6 +183,30 @@ async def execute_transcription_job(job_public_id: str) -> None:
         if job.user_id is not None:
             auth_user = db.get(User, job.user_id)
 
+        ctx["wallet_reserve_units"] = 0
+        if (
+            auth_user is not None
+            and auth_required()
+            and tr._env_truthy("TRANSCRIBE_JOB_WALLET_HOLD", True)
+        ):
+            hold = tr.estimate_transcription_job_wallet_hold_units(
+                estimated_duration_seconds=ctx.get("estimated"),
+                transcription_engine=str(ctx.get("transcription_engine") or "openai"),
+            )
+            if hold > 0:
+                try:
+                    debit_credits(db, auth_user, hold)
+                except HTTPException as e:
+                    job.status = "failed"
+                    job.error_detail = _detail_to_plain_str(e.detail)
+                    job.progress_percent = 0
+                    job.phase = None
+                    db.commit()
+                    return
+                job.wallet_reserved_units = hold
+                ctx["wallet_reserve_units"] = hold
+                db.commit()
+
         if ctx.get("estimated") is not None:
             job.estimated_duration_seconds = float(ctx["estimated"])
         last_save_mono = time.monotonic()
@@ -102,6 +219,7 @@ async def execute_transcription_job(job_public_id: str) -> None:
             subject=job.subject or "General",
             display_filename=job.original_filename,
             whisper_rt=whisper_rt,
+            ui_locale=job_ui_loc,
         ):
             typ = ev.get("type")
             phase = ev.get("phase") if isinstance(ev.get("phase"), str) else None
@@ -130,6 +248,7 @@ async def execute_transcription_job(job_public_id: str) -> None:
                     last_announced_pct = pct
 
             if typ == "error":
+                _release_job_wallet_hold(db, job, auth_user)
                 job.status = "failed"
                 detail = ev.get("detail")
                 job.error_detail = _detail_to_plain_str(detail)
@@ -139,6 +258,7 @@ async def execute_transcription_job(job_public_id: str) -> None:
             if typ == "done":
                 payload = ev.get("result")
                 if not isinstance(payload, dict):
+                    _release_job_wallet_hold(db, job, auth_user)
                     job.status = "failed"
                     job.error_detail = "Réponse transcription vide après finalisation."
                     db.commit()
@@ -146,6 +266,7 @@ async def execute_transcription_job(job_public_id: str) -> None:
                 try:
                     job.result_json = json.dumps(payload, ensure_ascii=False, default=str)
                 except TypeError:
+                    _release_job_wallet_hold(db, job, auth_user)
                     job.status = "failed"
                     job.error_detail = "Impossible de sérialiser la transcription finale."
                     db.commit()
@@ -153,7 +274,8 @@ async def execute_transcription_job(job_public_id: str) -> None:
                 job.status = "done"
                 job.phase = None
                 job.progress_percent = 100
-                job.status_message = "Terminé"
+                job.status_message = tr._ui_text(job_ui_loc, "Terminé", "تم")
+                job.wallet_reserved_units = 0
                 db.commit()
                 break
 
@@ -161,6 +283,8 @@ async def execute_transcription_job(job_public_id: str) -> None:
         logger.exception("execute_transcription_job public_id=%s", job_public_id)
         try:
             if job is not None:
+                auth_u = db.get(User, job.user_id) if job.user_id is not None else None
+                _release_job_wallet_hold(db, job, auth_u)
                 job.status = "failed"
                 job.error_detail = "Erreur interne pendant la transcription. Réessaie plus tard."
                 db.commit()
@@ -187,11 +311,15 @@ async def create_transcription_job(
     file: UploadFile = File(...),
     subject: str = Form(default="General"),
     speech_language: str = Form(default="fr"),
+    transcription_engine: str = Form(default="openai"),
+    ui_locale: str = Form(default="fr"),
 ):
     tr._reject_disallowed_media_type(file)
 
+    engine_norm = tr._normalize_transcription_engine(transcription_engine)
+
     api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+    if engine_norm != "local" and not api_key:
         raise HTTPException(status_code=500, detail="La clé technique de transcription est manquante sur le serveur.")
 
     ext = os.path.splitext(file.filename or "")[1].lower()
@@ -219,6 +347,7 @@ async def create_transcription_job(
     fname_disk = f"upload{ext or '.bin'}"
     rel = Path("jobs") / public_id / fname_disk
     abs_path = _DATA / rel
+    # Persisté avant le 202 : la file serveur peut continuer si l’utilisateur quitte la page après l’import.
     abs_path.write_bytes(content)
 
     uid: Optional[int] = None
@@ -227,18 +356,27 @@ async def create_transcription_job(
             raise HTTPException(status_code=401, detail="Connexion requise pour la transcription.")
         uid = _auth.id
 
+    speech_lang = ("ar" if (speech_language or "").strip().lower().startswith("ar") else "fr")[:16]
+    ui_loc = tr._normalize_ui_locale(ui_locale)[:16]
+    queued_msg = tr._ui_text(
+        ui_loc,
+        "Import terminé — file d’attente serveur.",
+        "اكتمل الاستيراد — في قائمة انتظار الخادم.",
+    )
     job = TranscriptionJob(
         public_id=public_id,
         user_id=uid,
         original_filename=(file.filename or fname_disk)[:384],
         subject=(subject or "General")[:512],
-        speech_language=("ar" if (speech_language or "").strip().lower().startswith("ar") else "fr")[:16],
+        speech_language=speech_lang,
+        ui_locale=ui_loc,
+        transcription_engine=engine_norm[:24],
         input_relpath=str(rel.as_posix()),
         client_content_type=(file.content_type or "")[:160] or None,
         status="queued",
         progress_percent=1,
         phase="received",
-        status_message="Import terminé — file d’attente serveur.",
+        status_message=queued_msg[:768],
     )
     db.add(job)
     db.commit()
@@ -248,12 +386,46 @@ async def create_transcription_job(
     return JSONResponse({"job_id": public_id, "status": job.status}, status_code=202)
 
 
+@router.post("/transcribe-jobs/{job_public_id}/cancel")
+def cancel_transcription_job(
+    job_public_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    _auth: Annotated[Optional[User], Depends(require_wallet_user)],
+):
+    """Annule uniquement un job encore « queued » (fichier supprimé, aucune facturation ni réserve)."""
+    job = db.scalars(select(TranscriptionJob).where(TranscriptionJob.public_id == job_public_id)).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Tâche introuvable.")
+    if auth_required():
+        if _auth is None:
+            raise HTTPException(status_code=401, detail="Connexion requise.")
+        if _auth.id != job.user_id:
+            raise HTTPException(status_code=403, detail="Accès refusé.")
+    elif job.user_id is not None:
+        raise HTTPException(status_code=403, detail="Connexion requise.")
+    if job.status != "queued":
+        raise HTTPException(
+            status_code=409,
+            detail="Cette transcription a déjà commencé ou est terminée — annulation impossible.",
+        )
+    ui = tr._normalize_ui_locale(getattr(job, "ui_locale", None))
+    job.status = "cancelled"
+    job.progress_percent = 0
+    job.phase = "cancelled"
+    job.status_message = tr._ui_text(ui, "Annulé avant traitement.", "أُلغي قبل المعالجة.")[:768]
+    job.error_detail = None
+    db.commit()
+    _purge_job_workspace(job_public_id)
+    return JSONResponse({"ok": True, "status": "cancelled"})
+
+
 def _serialize_job(job: TranscriptionJob, *, include_result: bool) -> dict[str, Any]:
     out: dict[str, Any] = {
         "job_id": job.public_id,
         "original_filename": job.original_filename,
         "subject": job.subject,
         "speech_language": job.speech_language,
+        "transcription_engine": getattr(job, "transcription_engine", None) or "openai",
         "status": job.status,
         "progress_percent": job.progress_percent,
         "phase": job.phase,

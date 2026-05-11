@@ -19,8 +19,15 @@ def credits_export() -> int:
 
 
 def registration_bonus_credits() -> int:
-    """Bonus d'inscription en unités portefeuille (MRU micro). Défaut 0 : aucun montant gratuit."""
-    return max(0, int(os.getenv("CREDITS_REGISTRATION_BONUS", "0")))
+    """Bonus d'inscription en unités portefeuille (MRU micro).
+
+    Si ``CREDITS_REGISTRATION_BONUS`` est absent ou vide : aucun bonus (0).
+    Sinon : entier interprété comme unités brutes ; ``0`` désactive explicitement le bonus.
+    """
+    raw = os.getenv("CREDITS_REGISTRATION_BONUS")
+    if raw is None or str(raw).strip() == "":
+        return 0
+    return max(0, int(raw))
 
 
 def registration_validity_days() -> int:

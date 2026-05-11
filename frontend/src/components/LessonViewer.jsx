@@ -1,10 +1,14 @@
-import { isValidElement } from "react";
+import { isValidElement, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useTranslation } from "react-i18next";
+import { ENGINE_TRANSCRIPTION } from "../branding.js";
 import ExportButtons from "./ExportButtons.jsx";
 import FlashcardDeck from "./FlashcardDeck.jsx";
 import QuizModule from "./QuizModule.jsx";
 import TranscriptMixedView from "./TranscriptMixedView.jsx";
+import UsageDetailsToggle from "./UsageDetailsToggle.jsx";
+import { allocateLessonBilledMru } from "../utils/allocateLessonBilledMru.js";
 import { extractNavHeadings, slugify } from "../utils/lessonParsers.js";
 import { estimateTokensFromText, formatMru } from "../utils/usage.js";
 
@@ -86,11 +90,27 @@ export default function LessonViewer({
   celebration,
   usage,
 }) {
+  const { t } = useTranslation();
   const headings = extractNavHeadings(lesson || "");
   const u = usage || {};
   const transcriptTok = estimateTokensFromText(transcript);
-  const totalMru =
-    Number(u.whisperBilledMru ?? 0) + Number(u.claudeBilledMru ?? 0);
+  const courseGenMru = Number(u.groqLessonBilledMru ?? u.claudeBilledMru ?? 0);
+  const insightOptMru = Number(u.groqInsightOptionalBilledMru ?? 0);
+  const totalMru = Number(u.whisperBilledMru ?? 0) + courseGenMru + insightOptMru;
+  const splitLesson = useMemo(() => allocateLessonBilledMru(lesson, courseGenMru), [lesson, courseGenMru]);
+  const mruTranscriptTab = Number(u.whisperBilledMru ?? 0) + insightOptMru;
+  const mruCoursTab = splitLesson.cours;
+  const mruQuizTab = splitLesson.quiz;
+  const mruFichesTab = splitLesson.fiches;
+  const billPoste = (titleKey, explainKey, mruVal) => (
+    <div className="rounded-2xl border border-slate-200/90 bg-white/60 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/50">
+      <div className="font-display text-sm font-bold text-slate-900 dark:text-white">{t(titleKey)}</div>
+      <div className="mt-1 text-lg font-bold tabular-nums text-brand-700 dark:text-brand-300">
+        {t("lesson.billMruLine", { n: formatMru(mruVal) })}
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-400">{t(explainKey)}</p>
+    </div>
+  );
   const foreignN = Number(transcriptMixedView?.foreign_segment_count ?? 0) || 0;
   /** Blocs structurés disponibles ; violet seulement si le texte cours n’a pas divergé du plain unifié. */
   const unifiedPrimary = transcriptMixedView?.blocks?.length > 0;
@@ -127,69 +147,70 @@ export default function LessonViewer({
         }`}
       >
         <div className="min-w-0">
-          <div className="font-display text-xl font-bold text-emerald-900 dark:text-emerald-100">
-            Ton cours est prêt ! 🎉
-          </div>
-          <p className="mt-1 text-sm leading-relaxed text-emerald-900/85 dark:text-emerald-200/90">
-            Navigue par onglet, saute aux sections dans la marge, exporte quand tout te convient.
-          </p>
+          <div className="font-display text-xl font-bold text-emerald-900 dark:text-emerald-100">{t("lesson.readyTitle")}</div>
+          <p className="mt-1 text-sm leading-relaxed text-emerald-900/85 dark:text-emerald-200/90">{t("lesson.readySub")}</p>
         </div>
         <ExportButtons lesson={lesson} subject={subject} filename={filename} disabled={false} />
       </div>
 
       <div className="glass-panel rounded-3xl p-5 text-sm shadow-soft">
-        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-          Estimation cette session (MRU)
-        </div>
-        <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <dt className="text-xs text-slate-500 dark:text-slate-400">Jetons transcript (est.)</dt>
-            <dd className="font-semibold text-slate-900 dark:text-white">{transcriptTok}</dd>
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{t("lesson.estimateTitle")}</div>
+
+        <UsageDetailsToggle className="mt-2">
+          <div className="rounded-2xl border border-slate-200/90 bg-gradient-to-br from-white to-slate-50/90 p-4 dark:border-slate-700 dark:from-slate-900/80 dark:to-slate-950/60">
+            <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200/90 pb-3 dark:border-slate-700">
+              <span className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                {t("lesson.billFourTotalLabel")}
+              </span>
+              <span className="font-display text-2xl font-bold tabular-nums text-brand-700 dark:text-brand-300">
+                {t("lesson.billSessionTotal", { n: formatMru(totalMru) })}
+              </span>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {billPoste("lesson.billTranscriptTitle", "lesson.billTranscriptExplain", mruTranscriptTab)}
+              {billPoste("lesson.billCoursTitle", "lesson.billCoursExplain", mruCoursTab)}
+              {billPoste("lesson.billQuizTitle", "lesson.billQuizExplain", mruQuizTab)}
+              {billPoste("lesson.billFichesTitle", "lesson.billFichesExplain", mruFichesTab)}
+            </div>
+            <p className="mt-3 text-xs leading-relaxed text-slate-600 dark:text-slate-400">{t("lesson.billSplitFootnote")}</p>
           </div>
-          <div>
-            <dt className="text-xs text-slate-500 dark:text-slate-400">Durée audio traitée</dt>
-            <dd className="font-semibold text-slate-900 dark:text-white">
-              {u.whisperAudioSeconds
-                ? `${(u.whisperAudioSeconds / 60).toFixed(2)} min`
-                : "—"}
-            </dd>
+
+          <div className="border-t border-slate-200/90 pt-4 dark:border-slate-700">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              {t("lesson.estimateMeasuresHeading")}
+            </div>
+            <dl className="mt-2 grid gap-3 sm:grid-cols-3">
+              <div>
+                <dt className="text-xs text-slate-500 dark:text-slate-400">{t("lesson.tokTrans")}</dt>
+                <dd className="font-semibold text-slate-900 dark:text-white">{transcriptTok}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-slate-500 dark:text-slate-400">{t("lesson.audioDur")}</dt>
+                <dd className="font-semibold text-slate-900 dark:text-white">
+                  {u.whisperAudioSeconds
+                    ? `${(u.whisperAudioSeconds / 60).toFixed(2)} min`
+                    : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-slate-500 dark:text-slate-400">{t("lesson.courseTok")}</dt>
+                <dd className="font-semibold text-slate-900 dark:text-white">
+                  {(u.groqLessonInput ?? u.claudeInput ?? 0).toLocaleString("fr-FR")}
+                  {" · "}
+                  {(u.groqLessonOutput ?? u.claudeOutput ?? 0).toLocaleString("fr-FR")}
+                </dd>
+              </div>
+            </dl>
           </div>
-          <div>
-            <dt className="text-xs text-slate-500 dark:text-slate-400">Jetons cours (entrée · sortie)</dt>
-            <dd className="font-semibold text-slate-900 dark:text-white">
-              {(u.claudeInput ?? 0).toLocaleString("fr-FR")}
-              {" · "}
-              {(u.claudeOutput ?? 0).toLocaleString("fr-FR")}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs text-slate-500 dark:text-slate-400">Total à prévoir (MRU)</dt>
-            <dd className="text-lg font-bold text-brand-700 dark:text-brand-300">
-              ~{formatMru(totalMru)} MRU
-            </dd>
-          </div>
-        </dl>
-        <dl className="mt-4 grid gap-3 border-t border-slate-100 pt-4 dark:border-slate-800 sm:grid-cols-2">
-          <div>
-            <dt className="text-xs text-slate-500 dark:text-slate-400">Transcription</dt>
-            <dd className="font-semibold text-slate-800 dark:text-slate-100">
-              ~{formatMru(u.whisperBilledMru)} MRU
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs text-slate-500 dark:text-slate-400">Génération du cours</dt>
-            <dd className="font-semibold text-slate-800 dark:text-slate-100">
-              ~{formatMru(u.claudeBilledMru)} MRU
-            </dd>
-          </div>
-        </dl>
+          <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">{t("lesson.estimateFootnote")}</p>
+        </UsageDetailsToggle>
       </div>
 
       <div className="-mx-1 flex gap-2 overflow-x-auto pb-1 pt-1">
-        {tabBtn("transcript", "Transcript")}
-        {tabBtn("lesson", "Cours complet")}
-        {tabBtn("quiz", "Quiz")}
-        {tabBtn("flashcards", "Fiches")}
+        {tabBtn("transcript", t("lesson.tabTranscript"))}
+        {tabBtn("lesson", t("lesson.tabLesson"))}
+        {tabBtn("quiz", t("lesson.tabQuiz"))}
+        {tabBtn("flashcards", t("lesson.tabFlash"))}
       </div>
 
       <div className="flex flex-col gap-8 lg:flex-row">
@@ -198,57 +219,57 @@ export default function LessonViewer({
             <>
               <div className="flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
                 <span>
-                  🌐 {speechChosenLabel ? `choix : ${speechChosenLabel} · Whisper : ` : ""}
-                  {language || "—"}
+                  🌐{" "}
+                  {speechChosenLabel
+                    ? t("lesson.choiceIntro", { speech: speechChosenLabel, transcription: ENGINE_TRANSCRIPTION })
+                    : ""}
+                  {language || t("common.dash")}
                 </span>
                 <span className="text-slate-300 dark:text-slate-600">•</span>
-                <span>📝 ~{wordCount} mots</span>
-                <span className="text-slate-300 dark:text-slate-600">•</span>
-                <span>🧮 ~{transcriptTok} jetons transcript (est.)</span>
-                {durationMinutes > 0 && (
-                  <>
-                    <span className="text-slate-300 dark:text-slate-600">•</span>
-                    <span>⏱ ~{durationMinutes} min</span>
-                  </>
-                )}
-                <span className="text-slate-300 dark:text-slate-600">•</span>
-                <span>💰 Total estimé&nbsp;: ~{formatMru(totalMru)} MRU</span>
+                <span>📝 {t("lesson.words", { n: wordCount })}</span>
                 {unifiedPrimary && foreignN > 0 && violetInSync ? (
                   <>
                     <span className="text-slate-300 dark:text-slate-600">•</span>
                     <span className="text-violet-600 dark:text-violet-400">
-                      🌍 {foreignN} passage{foreignN > 1 ? "s" : ""} autres langues (violet)
+                      {foreignN === 1
+                        ? t("lesson.passageOtherSingular", { count: foreignN })
+                        : t("lesson.passageOtherPlural", { count: foreignN })}
                     </span>
                   </>
                 ) : unifiedPrimary && violetInSync ? (
                   <>
                     <span className="text-slate-300 dark:text-slate-600">•</span>
-                    <span className="text-violet-700/90 dark:text-violet-400">Vue unifiée</span>
+                    <span className="text-violet-700/90 dark:text-violet-400">{t("lesson.unifiedBadge")}</span>
                   </>
                 ) : unifiedPrimary && !violetInSync ? (
                   <>
                     <span className="text-slate-300 dark:text-slate-600">•</span>
-                    <span className="text-amber-700 dark:text-amber-400">
-                      Texte modifié — aperçu structuré masqué
-                    </span>
+                    <span className="text-amber-700 dark:text-amber-400">{t("lesson.textEdited")}</span>
                   </>
                 ) : null}
               </div>
+              <UsageDetailsToggle compact className="mt-2">
+                <div className="flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
+                  <span>🧮 {t("lesson.tokTransLine", { n: transcriptTok })}</span>
+                  {durationMinutes > 0 ? (
+                    <>
+                      <span className="text-slate-300 dark:text-slate-600">•</span>
+                      <span>⏱ {t("lesson.min", { n: durationMinutes })}</span>
+                    </>
+                  ) : null}
+                  <span className="text-slate-300 dark:text-slate-600">•</span>
+                  <span>💰 {t("lesson.totalEst", { n: formatMru(totalMru) })}</span>
+                </div>
+              </UsageDetailsToggle>
               {unifiedPrimary && violetInSync ? (
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Transcription alignée avec la langue du cours ; les extraits hors langue apparaissent en violet / gras.
-                  Chronologie et repères [MM:SS] conservés.
-                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{t("lesson.alignHint")}</p>
               ) : unifiedPrimary && !violetInSync ? (
-                <p className="text-xs text-amber-800/90 dark:text-amber-300/90">
-                  Le texte du cours a été modifié par rapport à la vue unifiée ; l’affichage structuré (violet) est
-                  désactivé pour rester cohérent avec le texte brut.
-                </p>
+                <p className="text-xs text-amber-800/90 dark:text-amber-300/90">{t("lesson.divergedHint")}</p>
               ) : null}
               {unifiedPrimary && violetInSync ? (
                 <TranscriptMixedView
                   view={transcriptMixedView}
-                  emptyHint="Aucune donnée pour l’aperçu structuré — texte brut ci-dessous."
+                  emptyHint={t("lesson.emptyStructured")}
                 />
               ) : (
                 <pre className="glass-panel max-h-[70vh] overflow-auto whitespace-pre-wrap rounded-2xl p-4 font-sans text-sm leading-relaxed text-slate-800 dark:text-slate-100">
@@ -274,7 +295,7 @@ export default function LessonViewer({
           <aside className="w-full shrink-0 lg:w-56">
             <div className="glass-panel sticky top-28 rounded-2xl p-4 text-sm shadow-soft dark:!bg-slate-900/80">
               <div className="mb-3 font-display text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white">
-                Dans ce cours
+                {t("lesson.navTitle")}
               </div>
               <nav className="space-y-1">
                 {headings.map((h) => (

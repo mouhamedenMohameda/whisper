@@ -63,7 +63,7 @@ Dans l’app web connectée en admin, le bouton **« Valid. recharges »** o
 - **Backend (Railway / Render)**  
   - Root directory: `lecturai/backend`  
   - Start: `python -m uvicorn main:app --host 0.0.0.0 --port $PORT` (Render exposes `PORT`; Railway injects similarly)  
-  - Environment: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `JWT_SECRET`, `ADMIN_EMAIL` (compte unique pour `/api/admin/*`), `AUTH_REQUIRED=true`, volume persistant pour `backend/data` (captures + SQLite), ou `DATABASE_URL` PostgreSQL, `ALLOWED_ORIGINS=https://your-vercel-domain.app`  
+  - Environment: `OPENAI_API_KEY`, `GROQ_API_KEY` (génération de cours `/api/generate` + analyse transcript), `JWT_SECRET`, `ADMIN_EMAIL` (compte unique pour `/api/admin/*`), `AUTH_REQUIRED=true`, volume persistant pour `backend/data` (captures + SQLite), ou `DATABASE_URL` PostgreSQL, `ALLOWED_ORIGINS=https://your-vercel-domain.app`  
 
 ## Stack
 

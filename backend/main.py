@@ -10,12 +10,12 @@ from database import Base, engine
 from deps import auth_required
 from models import CreditTopUpRequest, TranscriptionJob, User  # noqa: F401 — charge models + tables
 from admin_sync import sync_designated_admin
-from routes import admin_credits, auth, credits, export, generate, transcribe, transcribe_jobs
-from schema_migrate import ensure_credit_schema
+from routes import admin_credits, auth, credits, export, generate, transcript_insight, transcribe, transcribe_jobs
+from schema_migrate import ensure_credit_schema, ensure_transcription_jobs_schema
 from security import jwt_secret
 
 # Resolve .env next to this file so it works regardless of cwd. override=True ensures
-# values from .env win over stale OPENAI_* / ANTHROPIC_* exported in the shell.
+# values from .env win over stale OPENAI_* / GROQ_* exported in the shell.
 _env_file = Path(__file__).resolve().parent / ".env"
 load_dotenv(_env_file, override=True)
 
@@ -28,7 +28,9 @@ async def lifespan(_: FastAPI):
         jwt_secret()
     Base.metadata.create_all(bind=engine)
     ensure_credit_schema(engine)
+    ensure_transcription_jobs_schema(engine)
     sync_designated_admin()
+    transcribe_jobs.init_transcribe_job_slots()
     yield
 
 
@@ -54,6 +56,7 @@ app.include_router(admin_credits.router, prefix="/api")
 app.include_router(transcribe.router, prefix="/api")
 app.include_router(transcribe_jobs.router, prefix="/api")
 app.include_router(generate.router, prefix="/api")
+app.include_router(transcript_insight.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 
 
@@ -64,4 +67,7 @@ def root():
 
 @app.get("/api/health")
 def health():
-    return {"ok": True}
+    return {
+        "ok": True,
+        "transcription_jobs_max_concurrent": transcribe_jobs.get_transcription_job_slot_capacity(),
+    }

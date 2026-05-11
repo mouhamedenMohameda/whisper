@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import AuthScreen from "./components/AuthScreen.jsx";
 import BgTranscribeJobsPanel from "./components/BgTranscribeJobsPanel.jsx";
@@ -6,15 +6,18 @@ import LanguageSwitcher from "./components/LanguageSwitcher.jsx";
 import TranscriptEditor from "./components/TranscriptEditor.jsx";
 import UploadZone from "./components/UploadZone.jsx";
 import WhatsAppSupportButton from "./components/WhatsAppSupportButton.jsx";
-import { ENGINE_COURSE, ENGINE_TRANSCRIPTION } from "./branding.js";
+import InsightPanel from "./components/InsightPanel.jsx";
+import { ENGINE_COURSE, ENGINE_INSIGHT, ENGINE_TRANSCRIPTION } from "./branding.js";
 import {
   TRANSCRIBE_SERVER_WEIGHT,
   TRANSCRIBE_UPLOAD_WEIGHT,
   TranscriptionJobFailedError,
   apiUrl,
   enqueueTranscribeJobWithXHR,
+  getTranscriptionJob,
   isUploadInterruptedError,
   generateLesson,
+  requestTranscriptInsight,
   getAuthHeaders,
   parseJsonResponse,
   waitForTerminalTranscriptionJob,
@@ -23,6 +26,7 @@ import { loadBgTranscribeJobIds, forgetBgTranscribeJobId, persistBgTranscribeJob
 import { clearAuthSession, getAuthProfile, getAuthToken, setAuthSession } from "./utils/authStorage.js";
 import { loadHistory, prependEntry, removeEntry, updateEntry } from "./utils/transcriptionHistory.js";
 import { mergeTranscriptMixedViews } from "./utils/transcriptMixedView.js";
+import { userFacingTranscriptionJobFailure } from "./utils/transcribeUserMessages.js";
 import i18n from "./i18n/index.js";
 
 const AdminTopUpsPage = lazy(() => import("./components/AdminTopUpsPage.jsx"));
@@ -42,11 +46,15 @@ const INITIAL_SESSION_USAGE = {
   whisperAudioSeconds: 0,
   whisperBilledMru: 0,
   whisperApiEstimatedTokensSum: 0,
-  claudeInput: 0,
-  claudeOutput: 0,
-  claudeBilledMru: 0,
+  groqLessonInput: 0,
+  groqLessonOutput: 0,
+  groqLessonBilledMru: 0,
   mixedLangPromptTokens: 0,
   mixedLangCompletionTokens: 0,
+  groqInsightPromptTokens: 0,
+  groqInsightCompletionTokens: 0,
+  /** MRU facturés par les appels « synthèse optionnelle » (/transcript-insight), hors total transcription. */
+  groqInsightOptionalBilledMru: 0,
 };
 
 /** @param {string} ph @param {(key: string, opts?: object) => string} t */
@@ -65,6 +73,25 @@ function newHistoryId() {
     /* noop */
   }
   return `h-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+/**
+ * Fusionne les passages ASR annotés de plusieurs fichiers (indices et source_file stables pour /generate).
+ * @param {{ label: string, passages: unknown }[]} pieces
+ */
+function mergeAsrPassagesAnnotated(pieces) {
+  const out = [];
+  let ix = 0;
+  for (const { label, passages } of pieces) {
+    if (!Array.isArray(passages)) continue;
+    for (const raw of passages) {
+      if (!raw || typeof raw !== "object") continue;
+      const p = /** @type {Record<string, unknown>} */ (raw);
+      out.push({ ...p, passage_index: ix, source_file: label });
+      ix += 1;
+    }
+  }
+  return out;
 }
 
 /** @param {Record<string, unknown>} data Réponse brute API transcription (succès). */
@@ -87,15 +114,26 @@ function historyEntryFromTranscribePayload(data, { filenames, subject, speechLan
     : 0;
   /** @type {Record<string, unknown>} */
   const su = typeof data.usage === "object" && data.usage !== null ? /** @type {Record<string, unknown>} */ (data.usage) : {};
+  const inferred =
+    typeof data.inferred_subject === "string" && data.inferred_subject.trim()
+      ? data.inferred_subject.trim()
+      : null;
+  const subjectOut = inferred || subject;
+  const ds = typeof data.deep_summary === "string" ? data.deep_summary.trim() : "";
+  const ap = data.asr_passages_annotated;
+  const asrPassagesAnnotated = Array.isArray(ap) ? ap : [];
   const usageSnapshot = {
     whisperAudioSeconds: Number(su.whisper_duration_seconds ?? 0),
     whisperBilledMru: Number(su.billed_mru_transcription_total ?? su.billed_mru_whisper ?? 0),
     whisperApiEstimatedTokensSum: Number(su.transcript_estimated_tokens ?? 0),
     mixedLangPromptTokens: Number(su.segment_translation_prompt_tokens ?? 0),
     mixedLangCompletionTokens: Number(su.segment_translation_completion_tokens ?? 0),
-    claudeInput: 0,
-    claudeOutput: 0,
-    claudeBilledMru: 0,
+    groqLessonInput: 0,
+    groqLessonOutput: 0,
+    groqLessonBilledMru: 0,
+    groqInsightPromptTokens: Number(su.groq_insight_prompt_tokens ?? 0),
+    groqInsightCompletionTokens: Number(su.groq_insight_completion_tokens ?? 0),
+    groqInsightOptionalBilledMru: 0,
   };
   return {
     id: historyId,
@@ -104,13 +142,42 @@ function historyEntryFromTranscribePayload(data, { filenames, subject, speechLan
     filenames,
     transcript: transcriptFinal,
     transcriptMixedView: mergedMv ?? null,
-    subject,
+    subject: subjectOut,
     speechLanguage,
     language: String(data.language || i18n.t("common.dash")),
     wordCount: wc,
     durationMinutes: Number(data.duration_minutes ?? 0),
     usage: usageSnapshot,
     lesson: null,
+    deepSummary: ds,
+    groqInsightApplied: Boolean(data.groq_insight_applied),
+    groqTranscriptTruncated: Boolean(data.groq_transcript_truncated),
+    transcriptionEngine:
+      typeof data.transcription_engine === "string" && data.transcription_engine.trim().toLowerCase() === "local"
+        ? "local"
+        : "openai",
+    asrPassagesAnnotated,
+  };
+}
+
+/** @param {Record<string, unknown>} row entrée liste `/api/transcribe-jobs` */
+function jobListRowToLiveState(row, t) {
+  const pct = typeof row.progress_percent === "number" ? row.progress_percent : 1;
+  const sf = Math.min(1, Math.max(0, pct / 100));
+  const msg =
+    typeof row.message === "string" && row.message.trim()
+      ? row.message.trim()
+      : t("transcribe.serverProcessing");
+  return {
+    uploadFrac: 1,
+    uploadFinished: true,
+    serverFrac: sf,
+    phase: typeof row.phase === "string" ? row.phase : "",
+    message: msg,
+    estimateNote: t("bgJobs.resumeNote"),
+    previewText: "",
+    whisperElapsedSec: null,
+    whisperExpectedSec: null,
   };
 }
 
@@ -495,7 +562,7 @@ function GeneratingSkeleton() {
 }
 
 export default function App() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [dark, setDark] = useDarkModeToggle();
   const [authGate, setAuthGate] = useState({
     loading: true,
@@ -606,13 +673,23 @@ export default function App() {
   const [files, setFiles] = useState([]);
   const [subject, setSubject] = useState("");
   const [speechLanguage, setSpeechLanguage] = useState("fr");
+  const [transcriptionEngine, setTranscriptionEngine] = useState(() => /** @type {"openai"|"local"} */ ("openai"));
   const [transcript, setTranscript] = useState("");
   const [transcriptMixedView, setTranscriptMixedView] = useState(null);
+  /** Passages ASR + scores (réponse transcription) — obligatoire pour /generate avec collage JSON. */
+  const [asrPassagesAnnotated, setAsrPassagesAnnotated] = useState(/** @type {unknown[]} */ ([]));
   const [language, setLanguage] = useState("");
   const [wordCount, setWordCount] = useState(0);
   const [durationMinutes, setDurationMinutes] = useState(0);
   const [primaryName, setPrimaryName] = useState("");
   const [lesson, setLesson] = useState("");
+  /** Résumé approfondi (LecturaSynth) après transcription ; conservé avec l'historique. */
+  const [deepSummary, setDeepSummary] = useState("");
+  const [groqTruncatedHint, setGroqTruncatedHint] = useState(false);
+  const [groqInsightApplied, setGroqInsightApplied] = useState(false);
+  /** Panneau synthèse d’aide à la lecture : ouvert seulement si demandé ou session historique avec synthèse. */
+  const [insightPanelOpen, setInsightPanelOpen] = useState(false);
+  const [insightLoading, setInsightLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("lesson");
   const [batchProgress, setBatchProgress] = useState({ perFile: [], overallPct: 0 });
   const [transcribeLive, setTranscribeLive] = useState(null);
@@ -649,7 +726,13 @@ export default function App() {
           if (!p.ok || typeof p.data !== "object" || p.data === null) continue;
           /** @type {Record<string, unknown>} */
           const lite = /** @type {Record<string, unknown>} */ (p.data);
-          if (lite.status !== "done") continue;
+          const stLite = String(lite.status || "");
+          if (stLite === "failed" || stLite === "cancelled") {
+            forgetBgTranscribeJobId(jobId);
+            void reloadCreditHud();
+            continue;
+          }
+          if (stLite !== "done") continue;
 
           const hid = `bg-job-${jobId}`;
           if (loadHistory().some((e) => e.id === hid)) {
@@ -709,14 +792,25 @@ export default function App() {
 
   const busy = phase === "transcribing" || phase === "generating";
 
+  const bgResumeAbortRef = useRef(/** @type {AbortController | null} */ (null));
+
   const goUpload = () => {
+    bgResumeAbortRef.current?.abort();
+    bgResumeAbortRef.current = null;
     setPhase("upload");
     setSpeechLanguage("fr");
+    setTranscriptionEngine("openai");
     setFiles([]);
     setBatchProgress({ perFile: [], overallPct: 0 });
     setTranscribeLive(null);
     setSessionUsage({ ...INITIAL_SESSION_USAGE });
     setTranscriptMixedView(null);
+    setAsrPassagesAnnotated([]);
+    setDeepSummary("");
+    setGroqTruncatedHint(false);
+    setGroqInsightApplied(false);
+    setInsightPanelOpen(false);
+    setInsightLoading(false);
     setCurrentHistoryId(null);
   };
 
@@ -726,21 +820,31 @@ export default function App() {
     setTranscript(entry.transcript || "");
     setSubject(entry.subject || "");
     setSpeechLanguage(entry.speechLanguage === "ar" ? "ar" : "fr");
+    setTranscriptionEngine(entry.transcriptionEngine === "local" ? "local" : "openai");
     setLanguage(entry.language || "");
     setWordCount(entry.wordCount || 0);
     setDurationMinutes(entry.durationMinutes ?? 0);
     setPrimaryName(entry.displayTitle || "");
     setLesson(entry.lesson || "");
     setTranscriptMixedView(entry.transcriptMixedView ?? null);
+    setAsrPassagesAnnotated(Array.isArray(entry.asrPassagesAnnotated) ? entry.asrPassagesAnnotated : []);
+    setDeepSummary(entry.deepSummary || "");
+    setGroqTruncatedHint(Boolean(entry.groqTranscriptTruncated));
+    setGroqInsightApplied(Boolean(entry.groqInsightApplied));
+    setInsightPanelOpen(Boolean(String(entry.deepSummary || "").trim()));
+    setInsightLoading(false);
     setSessionUsage({
       whisperAudioSeconds: u.whisperAudioSeconds ?? 0,
       whisperBilledMru: u.whisperBilledMru ?? 0,
       whisperApiEstimatedTokensSum: u.whisperApiEstimatedTokensSum ?? 0,
-      claudeInput: u.claudeInput ?? 0,
-      claudeOutput: u.claudeOutput ?? 0,
-      claudeBilledMru: u.claudeBilledMru ?? 0,
+      groqLessonInput: u.groqLessonInput ?? u.claudeInput ?? 0,
+      groqLessonOutput: u.groqLessonOutput ?? u.claudeOutput ?? 0,
+      groqLessonBilledMru: u.groqLessonBilledMru ?? u.claudeBilledMru ?? 0,
       mixedLangPromptTokens: u.mixedLangPromptTokens ?? 0,
       mixedLangCompletionTokens: u.mixedLangCompletionTokens ?? 0,
+      groqInsightPromptTokens: u.groqInsightPromptTokens ?? 0,
+      groqInsightCompletionTokens: u.groqInsightCompletionTokens ?? 0,
+      groqInsightOptionalBilledMru: Number(u.groqInsightOptionalBilledMru ?? 0),
     });
     setCurrentHistoryId(entry.id);
     const hasLesson = Boolean(entry.lesson && String(entry.lesson).trim());
@@ -750,6 +854,212 @@ export default function App() {
       new CustomEvent("lecturai-toast", { detail: { msg: t("app.sessionRestored"), type: "info" } }),
     );
   };
+
+  const openBgJobFromList = async (/** @type {Record<string, unknown>} */ row) => {
+      if (busy) {
+        window.dispatchEvent(
+          new CustomEvent("lecturai-toast", {
+            detail: { msg: t("bgJobs.busyOpenBlocked"), type: "info" },
+          }),
+        );
+        return;
+      }
+      const jobId =
+        typeof row.job_id === "string" ? row.job_id : typeof row.job_id === "number" ? String(row.job_id) : "";
+      if (!jobId.trim()) return;
+
+      const st = String(row.status || "");
+
+      if (st === "cancelled") {
+        window.dispatchEvent(
+          new CustomEvent("lecturai-toast", {
+            detail: { msg: t("bgJobs.openCancelled"), type: "info" },
+          }),
+        );
+        return;
+      }
+
+      if (st === "failed") {
+        window.dispatchEvent(
+          new CustomEvent("lecturai-toast", {
+            detail: {
+              msg: userFacingTranscriptionJobFailure(
+                typeof row.error_detail === "string" ? row.error_detail : "",
+                typeof row.message === "string" ? row.message : "",
+                t,
+              ),
+              type: "error",
+            },
+          }),
+        );
+        return;
+      }
+
+      if (st === "done") {
+        try {
+          const hid = `bg-job-${jobId}`;
+          let entry = loadHistory().find((e) => e.id === hid);
+          if (!entry) {
+            const full = await getTranscriptionJob(jobId, { include_result: true });
+            const rawRes = full.result;
+            if (!rawRes || typeof rawRes !== "object") {
+              throw new Error(t("transcribe.transcribeEmpty"));
+            }
+            /** @type {Record<string, unknown>} */
+            const result = rawRes;
+            const fn =
+              typeof result.filename === "string" && result.filename.trim()
+                ? result.filename.trim()
+                : typeof full.original_filename === "string"
+                  ? full.original_filename
+                  : t("common.audio");
+            prependEntry(
+              historyEntryFromTranscribePayload(result, {
+                historyId: hid,
+                filenames: [fn],
+                subject: typeof full.subject === "string" ? full.subject : t("common.general"),
+                speechLanguage: full.speech_language === "ar" ? "ar" : "fr",
+              }),
+            );
+            forgetBgTranscribeJobId(jobId);
+            reloadHistoryList();
+            void reloadCreditHud();
+            entry = loadHistory().find((e) => e.id === hid);
+          }
+          if (entry) openHistoryEntry(entry);
+        } catch (e) {
+          window.dispatchEvent(
+            new CustomEvent("lecturai-toast", {
+              detail: { msg: e?.message || t("bgJobs.openDoneFail"), type: "error" },
+            }),
+          );
+        }
+        return;
+      }
+
+      bgResumeAbortRef.current?.abort();
+      const ac = new AbortController();
+      bgResumeAbortRef.current = ac;
+      persistBgTranscribeJobId(jobId);
+
+      const displayName =
+        typeof row.original_filename === "string" && row.original_filename.trim()
+          ? row.original_filename.trim()
+          : t("history.untitled");
+
+      setFiles([]);
+      setBatchProgress({ perFile: [], overallPct: 0 });
+      setPrimaryName(displayName);
+      setTranscript("");
+      setTranscriptMixedView(null);
+      setAsrPassagesAnnotated([]);
+      setTranscribeLive(jobListRowToLiveState(row, t));
+      setPhase("transcribing");
+
+      const bumpFromPollRow = (/** @type {Record<string, unknown>} */ pollingRow) => {
+        const p = typeof pollingRow.progress_percent === "number" ? pollingRow.progress_percent : 1;
+        setTranscribeLive((prev) => ({
+          ...(prev || {}),
+          uploadFrac: 1,
+          uploadFinished: true,
+          serverFrac: Math.min(1, Math.max(0, p / 100)),
+          phase:
+            typeof pollingRow.phase === "string" ? pollingRow.phase : typeof prev?.phase === "string" ? prev.phase : "",
+          message:
+            typeof pollingRow.message === "string" && pollingRow.message.trim()
+              ? pollingRow.message.trim()
+              : prev?.message || t("transcribe.serverProcessing"),
+          previewText: prev?.previewText || "",
+          estimateNote: t("bgJobs.resumeNote"),
+          whisperElapsedSec: prev?.whisperElapsedSec ?? null,
+          whisperExpectedSec: prev?.whisperExpectedSec ?? null,
+        }));
+      };
+
+      void (async () => {
+        try {
+          /** @type {Record<string, unknown>} */
+          const terminalRow = await waitForTerminalTranscriptionJob(jobId, {
+            signal: ac.signal,
+            onTick: bumpFromPollRow,
+          });
+
+          forgetBgTranscribeJobId(jobId);
+          if (bgResumeAbortRef.current === ac) bgResumeAbortRef.current = null;
+
+          /** @type {unknown} */
+          const rawResult = terminalRow.result;
+          if (!rawResult || typeof rawResult !== "object") {
+            throw new Error(t("transcribe.transcribeEmpty"));
+          }
+          /** @type {Record<string, unknown>} */
+          const data = rawResult;
+
+          const label =
+            typeof data.filename === "string" && data.filename.trim()
+              ? data.filename.trim()
+              : typeof terminalRow.original_filename === "string"
+                ? terminalRow.original_filename.trim()
+                : displayName;
+
+          const hid = `bg-job-${jobId}`;
+          prependEntry(
+            historyEntryFromTranscribePayload(data, {
+              historyId: hid,
+              filenames: [label],
+              subject:
+                typeof terminalRow.subject === "string" ? terminalRow.subject.trim() || t("common.general") : t("common.general"),
+              speechLanguage: terminalRow.speech_language === "ar" ? "ar" : "fr",
+            }),
+          );
+          reloadHistoryList();
+          const settled = loadHistory().find((e) => e.id === hid);
+          if (settled) openHistoryEntry(settled);
+
+          void reloadCreditHud();
+          window.dispatchEvent(
+            new CustomEvent("lecturai-toast", {
+              detail: { msg: t("app.transcriptReady"), type: "success" },
+            }),
+          );
+        } catch (e) {
+          const aborted =
+            ac.signal.aborted ||
+            /** @type {{ name?: string; message?: string }} */ (e)?.name === "AbortError" ||
+            /** @type {{ message?: string }} */ (e)?.message === "Interrompu.";
+          forgetBgTranscribeJobId(jobId);
+          if (bgResumeAbortRef.current === ac) bgResumeAbortRef.current = null;
+          if (aborted) {
+            setPhase((p) => (p === "transcribing" ? "upload" : p));
+            return;
+          }
+          if (e instanceof TranscriptionJobFailedError) {
+            window.dispatchEvent(
+              new CustomEvent("lecturai-toast", {
+                detail: {
+                  msg: e.message || userFacingTranscriptionJobFailure("", "", t),
+                  type: "error",
+                },
+              }),
+            );
+            void reloadCreditHud();
+            setPhase("upload");
+            return;
+          }
+          const msg =
+            e instanceof Error && e.message.trim()
+              ? e.message.trim()
+              : t("app.transcribeFail");
+          window.dispatchEvent(
+            new CustomEvent("lecturai-toast", {
+              detail: { msg, type: "error" },
+            }),
+          );
+          void reloadCreditHud();
+          setPhase("upload");
+        }
+      })();
+    };
 
   const deleteHistoryEntry = (id) => {
     removeEntry(id);
@@ -770,16 +1080,24 @@ export default function App() {
 
   useEffect(() => {
     if (phase !== "editing" || !currentHistoryId) return;
-    const t = setTimeout(() => {
+    const tmr = setTimeout(() => {
       const wc = transcript.trim()
         ? transcript.trim().split(/\s+/).filter(Boolean).length
         : 0;
-      updateEntry(currentHistoryId, { transcript, wordCount: wc, subject });
+      updateEntry(currentHistoryId, {
+        transcript,
+        wordCount: wc,
+        subject,
+        deepSummary,
+        groqInsightApplied,
+        groqTranscriptTruncated: groqTruncatedHint,
+        asrPassagesAnnotated,
+      });
       setWordCount(wc);
       reloadHistoryList();
     }, 1400);
-    return () => clearTimeout(t);
-  }, [transcript, subject, phase, currentHistoryId]);
+    return () => clearTimeout(tmr);
+  }, [transcript, subject, phase, currentHistoryId, deepSummary, groqInsightApplied, groqTruncatedHint, asrPassagesAnnotated]);
 
   const exportBaseName = useMemo(() => {
     if (primaryName) return primaryName.replace(/\.[^/.]+$/, "");
@@ -789,6 +1107,8 @@ export default function App() {
 
   const startTranscription = async () => {
     if (files.length === 0) return;
+    bgResumeAbortRef.current?.abort();
+    bgResumeAbortRef.current = null;
     setPhase("transcribing");
     const n = files.length;
     const perFile = Array(n).fill(0);
@@ -815,6 +1135,7 @@ export default function App() {
     try {
       setSessionUsage({ ...INITIAL_SESSION_USAGE });
       setTranscriptMixedView(null);
+      setAsrPassagesAnnotated([]);
       let wSec = 0;
       let wMru = 0;
       let wTok = 0;
@@ -825,6 +1146,16 @@ export default function App() {
       let langs = [];
       let words = 0;
       let minutes = 0;
+
+      let groqPromptTot = 0;
+      let groqCompTot = 0;
+      let groqTruncAny = false;
+      let groqAppliedFlag = false;
+      let inferredMerged = "";
+      /** @type {string[]} */
+      const summaryPieces = [];
+      /** @type {{ label: string, passages: unknown }[]} */
+      const asrPieces = [];
 
       for (let i = 0; i < n; i += 1) {
         const f = files[i];
@@ -879,6 +1210,8 @@ export default function App() {
         let data;
         try {
           const enq = await enqueueTranscribeJobWithXHR(f, subject, speechLanguage, {
+            transcriptionEngine,
+            uiLocale: i18n.language,
             onUploadProgress: (u) => {
               uf = u;
               setTranscribeLive((prev) => ({
@@ -949,10 +1282,22 @@ export default function App() {
         wTok += Number(su.transcript_estimated_tokens ?? 0);
         mixPrompt += Number(su.segment_translation_prompt_tokens ?? 0);
         mixComp += Number(su.segment_translation_completion_tokens ?? 0);
+        groqPromptTot += Number(su.groq_insight_prompt_tokens ?? 0);
+        groqCompTot += Number(su.groq_insight_completion_tokens ?? 0);
+        if (data.groq_transcript_truncated) groqTruncAny = true;
+        if (data.groq_insight_applied) groqAppliedFlag = true;
+        const inferred = typeof data.inferred_subject === "string" ? data.inferred_subject.trim() : "";
+        if (inferred && !inferredMerged) inferredMerged = inferred;
+        const dsGroq = typeof data.deep_summary === "string" ? data.deep_summary.trim() : "";
 
         const label = data.filename || f.name;
+        if (dsGroq) {
+          summaryPieces.push(n === 1 ? dsGroq : `## ${String(label)}\n\n${dsGroq}`);
+        }
         chunks.push(`=== ${label} ===\n\n${data.timestamped_transcript || data.transcript}`);
         mixedPieces.push({ label, view: data.transcript_mixed_view ?? null });
+        const ap = data.asr_passages_annotated;
+        if (Array.isArray(ap)) asrPieces.push({ label, passages: ap });
         langs.push(data.language || "");
         minutes += data.duration_minutes || 0;
       }
@@ -979,20 +1324,39 @@ export default function App() {
       setDurationMinutes(minutes);
       setPrimaryName(files[0]?.name || "");
       setTranscriptMixedView(mergedMv);
+      const mergedAsr = mergeAsrPassagesAnnotated(asrPieces);
+      setAsrPassagesAnnotated(mergedAsr);
+
+      const mergedDeep =
+        summaryPieces.length === 0
+          ? ""
+          : summaryPieces.length === 1
+            ? summaryPieces[0]
+            : summaryPieces.join("\n\n---\n\n");
+      const subjectFinal = (inferredMerged || subject || "").trim() || t("common.general");
 
       const usageSnapshot = {
         whisperAudioSeconds: wSec,
         whisperBilledMru: wMru,
         whisperApiEstimatedTokensSum: wTok,
-        claudeInput: 0,
-        claudeOutput: 0,
-        claudeBilledMru: 0,
+        groqLessonInput: 0,
+        groqLessonOutput: 0,
+        groqLessonBilledMru: 0,
         mixedLangPromptTokens: mixPrompt,
         mixedLangCompletionTokens: mixComp,
+        groqInsightPromptTokens: groqPromptTot,
+        groqInsightCompletionTokens: groqCompTot,
+        groqInsightOptionalBilledMru: 0,
       };
       setSessionUsage(usageSnapshot);
 
       const hid = newHistoryId();
+      setDeepSummary(mergedDeep);
+      setGroqTruncatedHint(groqTruncAny);
+      setGroqInsightApplied(groqAppliedFlag);
+      setInsightPanelOpen(false);
+      setSubject(subjectFinal);
+
       prependEntry({
         id: hid,
         createdAt: new Date().toISOString(),
@@ -1000,13 +1364,18 @@ export default function App() {
         filenames: files.map((f) => f.name),
         transcript: transcriptFinal,
         transcriptMixedView: mergedMv ?? null,
-        subject,
+        subject: subjectFinal,
         speechLanguage,
+        transcriptionEngine,
         language: langDisplay,
         wordCount: wc,
         durationMinutes: minutes,
         usage: { ...usageSnapshot },
         lesson: null,
+        deepSummary: mergedDeep,
+        groqInsightApplied: groqAppliedFlag,
+        groqTranscriptTruncated: groqTruncAny,
+        asrPassagesAnnotated: mergedAsr,
       });
       setCurrentHistoryId(hid);
       reloadHistoryList();
@@ -1020,6 +1389,7 @@ export default function App() {
       );
     } catch (e) {
       setTranscriptMixedView(null);
+      setAsrPassagesAnnotated([]);
       const interrupted = isUploadInterruptedError(e);
       window.dispatchEvent(
         new CustomEvent("lecturai-toast", {
@@ -1030,6 +1400,67 @@ export default function App() {
         }),
       );
       setPhase("upload");
+    }
+  };
+
+  const runOptionalTranscriptInsight = async () => {
+    if (transcript.trim().length < 80) {
+      window.dispatchEvent(
+        new CustomEvent("lecturai-toast", {
+          detail: { msg: t("app.insightTooShort"), type: "error" },
+        }),
+      );
+      return;
+    }
+    setInsightLoading(true);
+    try {
+      const res = await requestTranscriptInsight(transcript, subject || "General", speechLanguage);
+      const inf = typeof res.inferred_subject === "string" ? res.inferred_subject.trim() : "";
+      const ds = typeof res.deep_summary === "string" ? res.deep_summary.trim() : "";
+      const u = /** @type {Record<string, unknown>} */ (res.usage || {});
+      const pt = Number(u.groq_insight_prompt_tokens ?? 0);
+      const ct = Number(u.groq_insight_completion_tokens ?? 0);
+      const insightMru = Number(u.billed_mru_groq_insight ?? 0);
+      if (inf) setSubject(inf);
+      setDeepSummary(ds);
+      setGroqTruncatedHint(Boolean(res.groq_transcript_truncated));
+      setGroqInsightApplied(true);
+      setInsightPanelOpen(true);
+      setSessionUsage((prev) => ({
+        ...prev,
+        groqInsightPromptTokens: pt,
+        groqInsightCompletionTokens: ct,
+        groqInsightOptionalBilledMru: Number(prev.groqInsightOptionalBilledMru || 0) + insightMru,
+      }));
+      if (currentHistoryId) {
+        const prevU = loadHistory().find((e) => e.id === currentHistoryId)?.usage || {};
+        const prevInsightMru = Number(prevU.groqInsightOptionalBilledMru ?? 0);
+        updateEntry(currentHistoryId, {
+          subject: inf || subject,
+          deepSummary: ds,
+          groqInsightApplied: true,
+          groqTranscriptTruncated: Boolean(res.groq_transcript_truncated),
+          usage: {
+            ...prevU,
+            groqInsightPromptTokens: pt,
+            groqInsightCompletionTokens: ct,
+            groqInsightOptionalBilledMru: prevInsightMru + insightMru,
+          },
+        });
+        reloadHistoryList();
+      }
+      void reloadCreditHud();
+      window.dispatchEvent(
+        new CustomEvent("lecturai-toast", { detail: { msg: t("app.insightReadyToast"), type: "success" } }),
+      );
+    } catch (e) {
+      window.dispatchEvent(
+        new CustomEvent("lecturai-toast", {
+          detail: { msg: e?.message || t("app.insightFail"), type: "error" },
+        }),
+      );
+    } finally {
+      setInsightLoading(false);
     }
   };
 
@@ -1047,11 +1478,17 @@ export default function App() {
     }
     setPhase("generating");
     try {
-      const result = await generateLesson(transcript, subject || "General");
+      const result = await generateLesson(
+        transcript,
+        subject || "General",
+        transcriptMixedView,
+        asrPassagesAnnotated,
+        i18n.language,
+      );
       const gu = result.usage || {};
-      const cin = gu.claude_input_tokens ?? result.input_tokens ?? 0;
-      const cout = gu.claude_output_tokens ?? result.output_tokens ?? 0;
-      const cmru = Number(gu.billed_mru_claude ?? 0);
+      const cin = gu.groq_input_tokens ?? result.input_tokens ?? 0;
+      const cout = gu.groq_output_tokens ?? result.output_tokens ?? 0;
+      const cmru = Number(gu.billed_mru_groq ?? 0);
 
       const wcLesson = transcript.trim()
         ? transcript.trim().split(/\s+/).filter(Boolean).length
@@ -1062,9 +1499,9 @@ export default function App() {
 
       setSessionUsage((prev) => ({
         ...prev,
-        claudeInput: cin,
-        claudeOutput: cout,
-        claudeBilledMru: cmru,
+        groqLessonInput: cin,
+        groqLessonOutput: cout,
+        groqLessonBilledMru: cmru,
       }));
 
       if (currentHistoryId) {
@@ -1075,11 +1512,12 @@ export default function App() {
           wordCount: wcLesson,
           lesson: result.lesson || "",
           durationMinutes,
+          asrPassagesAnnotated,
           usage: {
             ...(loadHistory().find((e) => e.id === currentHistoryId)?.usage || {}),
-            claudeInput: cin,
-            claudeOutput: cout,
-            claudeBilledMru: cmru,
+            groqLessonInput: cin,
+            groqLessonOutput: cout,
+            groqLessonBilledMru: cmru,
           },
         });
         reloadHistoryList();
@@ -1381,16 +1819,34 @@ export default function App() {
               onSubjectChange={setSubject}
               speechLanguage={speechLanguage}
               onSpeechLanguageChange={setSpeechLanguage}
+              transcriptionEngine={transcriptionEngine}
+              onTranscriptionEngineChange={setTranscriptionEngine}
               disabled={busy}
               batchProgress={batchProgress}
               onSubmit={startTranscription}
             />
-            <BgTranscribeJobsPanel authReady={authGate.ready} />
+            <BgTranscribeJobsPanel
+              authReady={authGate.ready}
+              onOpenJob={openBgJobFromList}
+              onWalletUpdated={reloadCreditHud}
+            />
           </>
         )}
 
         {phase === "transcribing" && (
           <>
+            {files.length === 0 ? (
+              <div className="mx-auto mb-6 w-full max-w-xl space-y-2 text-center">
+                <button
+                  type="button"
+                  onClick={() => goUpload()}
+                  className="rounded-2xl border border-slate-200/90 bg-white/85 px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-white dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100 dark:hover:bg-slate-800"
+                >
+                  {t("bgJobs.resumeBack")}
+                </button>
+                <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">{t("bgJobs.serverPersistHint")}</p>
+              </div>
+            ) : null}
             {files.length > 0 && (
               <section className="glass-panel mx-auto mb-8 w-full max-w-xl space-y-3 rounded-3xl p-5 shadow-soft">
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
@@ -1454,6 +1910,45 @@ export default function App() {
                 {t("app.newImport")}
               </button>
             </div>
+
+            {transcript.trim().length >= 80 && (
+              <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 text-sm text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
+                <p className="font-medium text-slate-900 dark:text-slate-50">{t("app.insightOptionalTitle", { insight: ENGINE_INSIGHT })}</p>
+                <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">{t("app.insightOptionalHint")}</p>
+                {!insightPanelOpen ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {String(deepSummary || "").trim() ? (
+                      <button
+                        type="button"
+                        onClick={() => setInsightPanelOpen(true)}
+                        className="rounded-xl border border-indigo-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-800 transition hover:bg-indigo-50 dark:border-indigo-800 dark:bg-slate-900 dark:text-indigo-200 dark:hover:bg-slate-800"
+                      >
+                        {t("app.insightShowBtn")}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={insightLoading || busy}
+                        onClick={() => void runOptionalTranscriptInsight()}
+                        className="rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {insightLoading ? t("app.insightLoading") : t("app.insightRunBtn")}
+                      </button>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            <InsightPanel
+              subject={subject}
+              onSubjectChange={setSubject}
+              deepSummary={deepSummary}
+              truncated={groqTruncatedHint}
+              usage={sessionUsage}
+              show={insightPanelOpen}
+              onClose={() => setInsightPanelOpen(false)}
+            />
 
             <TranscriptEditor
               value={transcript}
@@ -1527,6 +2022,12 @@ export default function App() {
                   setLesson("");
                   setTranscript("");
                   setTranscriptMixedView(null);
+                  setAsrPassagesAnnotated([]);
+                  setDeepSummary("");
+                  setGroqTruncatedHint(false);
+                  setGroqInsightApplied(false);
+                  setInsightPanelOpen(false);
+                  setInsightLoading(false);
                   setFiles([]);
                   setSpeechLanguage("fr");
                   setPhase("upload");

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { ENGINE_TRANSCRIPTION } from "../branding.js";
+import { ENGINE_BRIDGE, ENGINE_TRANSCRIPTION } from "../branding.js";
 import TranscriptMixedView from "./TranscriptMixedView.jsx";
+import UsageDetailsToggle from "./UsageDetailsToggle.jsx";
 import { estimateTokensFromText, formatMru } from "../utils/usage.js";
 
 export default function TranscriptEditor({
@@ -48,27 +49,6 @@ export default function TranscriptEditor({
         <span className="rounded-full border border-slate-200 px-3 py-1 text-xs dark:border-slate-700 dark:text-slate-300">
           📝 {t("editor.words", { n: wordCount || 0 })}
         </span>
-        {durationMinutes > 0 && (
-          <span className="rounded-full border border-slate-200 px-3 py-1 text-xs dark:border-slate-700 dark:text-slate-300">
-            ⏱ {t("editor.minAudio", { n: durationMinutes })}
-          </span>
-        )}
-        <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs dark:border-violet-800 dark:bg-violet-950/50 dark:text-violet-100">
-          🧮 {t("editor.tokEst", { n: liveTok })}
-          <span className="opacity-75">{t("editor.tokEstHint")}</span>
-        </span>
-        {(apiTokSum > 0 || secs > 0) && (
-          <span className="rounded-full border border-slate-200 px-3 py-1 text-xs dark:border-slate-700 dark:text-slate-300">
-            {t("editor.whisperTok", {
-              engine: ENGINE_TRANSCRIPTION,
-              n: apiTokSum > 0 ? apiTokSum : t("common.dash"),
-              min: audioMinDisp ? t("editor.realMin", { n: audioMinDisp }) : "",
-            })}
-          </span>
-        )}
-        <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-          💰 {t("editor.mruLine", { n: formatMru(usage?.whisperBilledMru ?? 0) })}
-        </span>
         {unifiedPrimary && foreignN > 0 && showVioletHero ? (
           <span className="rounded-full border border-red-200/90 bg-red-50 px-3 py-1 text-xs font-medium text-red-900 dark:border-red-900/60 dark:bg-red-950/45 dark:text-red-100">
             🌍 {t("editor.langsOther", { count: foreignN })}
@@ -87,12 +67,38 @@ export default function TranscriptEditor({
             ✓ {t("editor.clearPassage", { count: highRelN })}
           </span>
         ) : null}
-        {mixPrompt + mixComp > 0 ? (
-          <span className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 dark:border-slate-600 dark:text-slate-400">
-            {t("editor.gptTok", { n: mixPrompt + mixComp })}
-          </span>
-        ) : null}
       </div>
+
+      <UsageDetailsToggle compact className="mt-1">
+        <div className="flex flex-wrap gap-2">
+          {durationMinutes > 0 && (
+            <span className="rounded-full border border-slate-200 px-3 py-1 text-xs dark:border-slate-700 dark:text-slate-300">
+              ⏱ {t("editor.minAudio", { n: durationMinutes })}
+            </span>
+          )}
+          <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs dark:border-violet-800 dark:bg-violet-950/50 dark:text-violet-100">
+            🧮 {t("editor.tokEst", { n: liveTok })}
+            <span className="opacity-75">{t("editor.tokEstHint")}</span>
+          </span>
+          {(apiTokSum > 0 || secs > 0) && (
+            <span className="rounded-full border border-slate-200 px-3 py-1 text-xs dark:border-slate-700 dark:text-slate-300">
+              {t("editor.whisperTok", {
+                engine: ENGINE_TRANSCRIPTION,
+                n: apiTokSum > 0 ? apiTokSum : t("common.dash"),
+                min: audioMinDisp ? t("editor.realMin", { n: audioMinDisp }) : "",
+              })}
+            </span>
+          )}
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+            💰 {t("editor.mruLine", { n: formatMru(usage?.whisperBilledMru ?? 0) })}
+          </span>
+          {mixPrompt + mixComp > 0 ? (
+            <span className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 dark:border-slate-600 dark:text-slate-400">
+              {t("editor.bridgeTok", { engine: ENGINE_BRIDGE, n: mixPrompt + mixComp })}
+            </span>
+          ) : null}
+        </div>
+      </UsageDetailsToggle>
 
       {unifiedPrimary && showVioletHero ? (
         <>

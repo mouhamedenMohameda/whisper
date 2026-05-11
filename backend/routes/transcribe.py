@@ -19,13 +19,17 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from credits_wallet import debit_credits
+from credits_wallet import credit_credits, debit_credits
 from database import get_db
 from deps import require_wallet_user
+from groq_transcript_intel import groq_infer_subject_and_deep_summary
+from experimental import local_whisper_transcriber as _lw_addon
 from models import User
 from pricing import (
     billed_mru_to_wallet_units_debit,
     estimate_tokens_from_chars,
+    groq_chat_provider_usd,
+    local_whisper_provider_usd,
     openai_transcribe_chat_provider_usd,
     transcribe_aggregate_billed_mru,
     wallet_units_to_mru_display,
@@ -59,6 +63,105 @@ MAX_SIZE_MB = int(os.getenv("TRANSCRIBE_MAX_MB", "2048"))
 MAX_DURATION_SECONDS = int(os.getenv("TRANSCRIBE_MAX_DURATION_SECONDS", str(2 * 3600)))
 # Taille maximale d’un seul fichier envoyé à l’API « whisper-1 » (OpenAI) — le serveur découpe au‑delà.
 OPENAI_WHISPER_MAX_UPLOAD_MB = float(os.getenv("OPENAI_WHISPER_MAX_UPLOAD_MB", "25"))
+
+
+def _normalize_transcription_engine(raw: Optional[str]) -> str:
+    s = (raw or "openai").strip().lower()
+    if s in ("local", "local_whisper", "offline", "cpu"):
+        if not _lw_addon.is_local_whisper_feature_enabled():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Le mode transcription local n’est pas activé sur ce serveur "
+                    "(variable TRANSCRIBE_LOCAL_WHISPER_ENABLED)."
+                ),
+            )
+        return "local"
+    return "openai"
+
+
+def _normalize_ui_locale(raw: Optional[str]) -> str:
+    """Interface locale for NDJSON / job status strings (fr | ar only)."""
+    s = (raw or "fr").strip().lower().replace("-", "_")
+    return "ar" if s.startswith("ar") else "fr"
+
+
+def _ui_text(loc: str, fr: str, ar: str) -> str:
+    return ar if loc == "ar" else fr
+
+
+_DETAIL_GENERIC_LOCAL_SAFE = (
+    "Échec interne lors de la transcription locale — réessaie, ou réencode le fichier en MP3/M4A. "
+    "Si le problème continue, vérifie le journal serveur ou redémarre le service."
+)
+
+
+def estimate_transcription_job_wallet_hold_units(
+    *, estimated_duration_seconds: Optional[float], transcription_engine: str
+) -> int:
+    """
+    Plafond (unités portefeuille) réservé au passage en « processing » pour un job /transcribe-jobs.
+    En cas d’échec ou d’annulation avant facturation finale, la réserve est recréditée.
+    """
+    try:
+        cap_sec = float(os.getenv("TRANSCRIBE_MAX_DURATION_SECONDS", str(2 * 3600)))
+    except ValueError:
+        cap_sec = 7200.0
+    d = float(estimated_duration_seconds or 0.0)
+    if d <= 0:
+        d = 90.0
+    d = min(max(d, 1.0), cap_sec)
+    eng = (transcription_engine or "openai").strip().lower()
+    w_usd = local_whisper_provider_usd(d) if eng == "local" else whisper_provider_usd(d)
+    try:
+        extra = float(os.getenv("TRANSCRIBE_JOB_HOLD_EXTRA_PROVIDER_USD", "0.04"))
+    except ValueError:
+        extra = 0.04
+    extra = max(0.0, extra)
+    total_usd = w_usd + extra
+    try:
+        mult = float(os.getenv("TRANSCRIBE_JOB_HOLD_SAFETY_MULTIPLIER", "1.12"))
+    except ValueError:
+        mult = 1.12
+    mult = max(1.0, min(mult, 2.0))
+    total_usd *= mult
+    mru = transcribe_aggregate_billed_mru(total_usd)
+    return billed_mru_to_wallet_units_debit(mru)
+
+
+def sanitize_user_visible_transcription_detail(raw: Any) -> str:
+    """
+    Les exceptions Torch/Whisper peuvent avoir pour « message » une repr(nn.Module),
+    par ex. « Linear(in_features=768, ...) » — ce n’est pas lisible pour l’utilisateur.
+    """
+    if raw is None:
+        return _DETAIL_GENERIC_LOCAL_SAFE
+    s = raw.strip() if isinstance(raw, str) else str(raw).strip()
+    if not s:
+        return _DETAIL_GENERIC_LOCAL_SAFE
+    lower = s.lower()
+    leaky = (
+        "in_features=",
+        "out_features=",
+        "bias=true",
+        "torch.nn.",
+        "torch._",
+        "<module ",
+        "autograd.",
+        "parameter containing",
+        "nn.parameter",
+        "nn.linear",
+        "nn.conv",
+        "conv1d(",
+        "conv2d(",
+        "embedding(",
+    )
+    starts_layerish = ("linear(", "layer norm", "multiheadattention")
+    if any(m in lower for m in leaky) or lower.startswith(starts_layerish):
+        return _DETAIL_GENERIC_LOCAL_SAFE
+    if len(s) > 560:
+        return s[:520].rstrip() + "…"
+    return s
 
 
 def _env_truthy(name: str, default: bool = True) -> bool:
@@ -353,6 +456,8 @@ def _ffmpeg_extract_mono_mp3_chunk(
 def _prepare_whisper_chunks(
     tmp_path: str,
     estimated_duration: Optional[float],
+    *,
+    transcription_engine: str = "openai",
 ) -> tuple[list[tuple[str, float]], list[str], bool]:
     """
     Retourne (liste (chemin_fichier, offset_temps_sec), chemins_segments_à_supprimer, preprocess_mono_appliqué).
@@ -404,21 +509,50 @@ def _prepare_whisper_chunks(
 
     seg_paths: list[str] = []
     chunks: list[tuple[str, float]] = []
+
+    # Plan (start, dur) sans extraire encore — permet de fusionner une fin de fichier trop courte.
+    plan: list[tuple[float, float]] = []
     n = int(math.ceil(total_dur / chunk_dur))
     for i in range(n):
         start = i * chunk_dur
         dur = min(chunk_dur, total_dur - start)
-        if dur < 0.5:
-            break
+        if dur < 0.01:
+            continue
+        plan.append((start, dur))
+
+    # Whisper **local** : un dernier morceau de quelques centaines de ms–2 s déclenche souvent
+    # des erreurs « reshape / 0 elements » sur le mel — on fusionne avec le segment précédent.
+    if (transcription_engine or "openai").strip().lower() == "local":
+        try:
+            min_tail = float(os.getenv("TRANSCRIBE_LOCAL_MIN_CHUNK_SECONDS", "3.0"))
+        except ValueError:
+            min_tail = 3.0
+        min_tail = max(0.5, min(min_tail, 30.0))
+        while len(plan) >= 2 and plan[-1][1] < min_tail:
+            s_prev, d_prev = plan[-2]
+            _s_tail, d_tail = plan[-1]
+            plan[-2] = (s_prev, d_prev + d_tail)
+            plan.pop()
+
+    for start, dur in plan:
+        if dur < 0.25:
+            continue
         part = _ffmpeg_extract_mono_mp3_chunk(tmp_path, start, dur, br_str, filt)
         chunks.append((part, start))
         seg_paths.append(part)
 
+    if not chunks:
+        raise HTTPException(
+            status_code=400,
+            detail="Impossible de produire des segments audio valides après découpage — fichier trop court ou corrompu.",
+        )
+
     logger.info(
-        "TRANSCRIBE: découpage automatique — %s segment(s) Whisper (~%.0f s / segment, durée totale %.0f s).",
+        "TRANSCRIBE: découpage automatique — %s segment(s) Whisper (~%.0f s plan / segment, durée totale %.0f s, moteur=%s).",
         len(chunks),
         chunk_dur,
         total_dur,
+        transcription_engine,
     )
     return chunks, seg_paths, False
 
@@ -478,6 +612,24 @@ def _merge_whisper_verbose_responses(responses: list[Any], time_offsets: list[fl
 
     merged_text = " ".join(texts).strip()
     return SimpleNamespace(text=merged_text, segments=all_segs, language=lang)
+
+
+def _call_local_whisper_merged(
+    whisper_chunks: list[tuple[str, float]],
+    speech_language: str,
+    whisper_prompt: Optional[str],
+) -> Any:
+    """Mode expérimental : openai-whisper sur le VPS (voir dossier experimental/)."""
+    responses: list[Any] = []
+    offsets: list[float] = []
+    if not whisper_chunks:
+        raise ValueError("whisper_chunks vide")
+    for path, off in whisper_chunks:
+        responses.append(
+            _lw_addon.transcribe_verbose_one_chunk(path, speech_language, whisper_prompt),
+        )
+        offsets.append(off)
+    return _merge_whisper_verbose_responses(responses, offsets)
 
 
 def _seg_start(seg: Any) -> float:
@@ -583,6 +735,63 @@ def _whisper_reliability_payload(seg: Any) -> dict[str, Any]:
             "compression_ratio_max": cr_max,
         },
     }
+
+
+def _seg_end(seg: Any) -> float:
+    if isinstance(seg, dict):
+        return float(seg.get("end", 0) or 0)
+    try:
+        return float(getattr(seg, "end", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def build_asr_passages_annotated(
+    segments: list[Any],
+    *,
+    fallback_plain: str = "",
+    fallback_end_sec: float = 0.0,
+) -> list[dict[str, Any]]:
+    """
+    Liste JSON des passages ASR avec scores Whisper (pour Groq / génération de cours).
+    Ordre chronologique ; indices stables 0..n-1.
+    Si Whisper ne renvoie aucun segment texte mais un transcript global : un passage synthétique.
+    """
+    ordered = sorted(segments or [], key=_seg_start)
+    out: list[dict[str, Any]] = []
+    for seg in ordered:
+        txt = (_seg_text(seg) or "").strip()
+        if not txt:
+            continue
+        out.append(
+            {
+                "passage_index": len(out),
+                "start_sec": round(float(_seg_start(seg)), 4),
+                "end_sec": round(float(_seg_end(seg)), 4),
+                "text": txt,
+                "reliability": _whisper_reliability_payload(seg),
+            }
+        )
+    if not out and (fallback_plain or "").strip():
+        return [
+            {
+                "passage_index": 0,
+                "start_sec": 0.0,
+                "end_sec": round(max(0.0, float(fallback_end_sec)), 4),
+                "text": (fallback_plain or "").strip(),
+                "reliability": {
+                    "high_reliability": False,
+                    "score_0_100": 0.0,
+                    "avg_logprob": None,
+                    "no_speech_prob": None,
+                    "compression_ratio": None,
+                    "temperature": None,
+                    "thresholds": {},
+                    "note": "no_whisper_segment_metrics_whole_transcript_fallback",
+                },
+            }
+        ]
+    return out
 
 
 def build_verbatim_transcript(segments: list, fallback_text: str) -> str:
@@ -1575,21 +1784,27 @@ def _build_transcribe_success_payload(
     *,
     db: Session,
     _auth: Optional[User],
-    client: openai.OpenAI,
+    client: Optional[openai.OpenAI],
     response,
     subject: str,
     speech_language: str,
     filename: Optional[str],
     audio_preprocess_applied: bool,
     whisper_chunk_count: int = 1,
+    transcription_engine: str = "openai",
+    wallet_reserve_units_already_debited: int = 0,
 ) -> dict[str, Any]:
     segments_raw = getattr(response, "segments", None) or []
     seg_work = _segments_to_processing_dicts(segments_raw)
 
+    use_local_cut = transcription_engine == "local"
+
     semantic_polish_applied = False
     polish_usage_accum: dict[str, int] = {}
     polish_on = (
-        _env_truthy("TRANSCRIBE_ENABLE_SEMANTIC_POLISH", False)
+        not use_local_cut
+        and client is not None
+        and _env_truthy("TRANSCRIBE_ENABLE_SEMANTIC_POLISH", False)
         and bool(seg_work)
         and speech_language in ("fr", "ar")
     )
@@ -1622,13 +1837,25 @@ def _build_transcribe_success_payload(
 
     _reject_if_duration_exceeds(duration_sec)
 
+    groq_intel: Optional[dict[str, Any]] = None
+    if (
+        (os.getenv("GROQ_API_KEY") or "").strip()
+        and _env_truthy("TRANSCRIBE_ENABLE_GROQ_INSIGHT", False)
+        and len((verbatim or "").strip()) >= 80
+    ):
+        groq_intel = groq_infer_subject_and_deep_summary(
+            transcript_plain=verbatim,
+            user_subject_hint=subject,
+            speech_language=speech_language,
+        )
+
     text_for_token_est = timestamped or verbatim
     est_tokens = estimate_tokens_from_chars(text_for_token_est)
-    whisper_usd_audio = whisper_provider_usd(duration_sec)
+    whisper_usd_audio = local_whisper_provider_usd(duration_sec) if use_local_cut else whisper_provider_usd(duration_sec)
 
     transcript_mixed_view: Optional[dict[str, Any]] = None
     mixed_usage_update: dict[str, Any] = {}
-    if _env_truthy("TRANSCRIBE_ENABLE_MIXED_LANG_VIEW", True):
+    if client is not None and not use_local_cut and _env_truthy("TRANSCRIBE_ENABLE_MIXED_LANG_VIEW", True):
         m_blocks, mixed_meta = build_transcript_mixed_view_blocks(client, segments, api_text, speech_language)
         _parts_m: list[str] = []
         for b in m_blocks:
@@ -1661,13 +1888,23 @@ def _build_transcribe_success_payload(
     chat_comp_tot = int(polish_usage_accum.get("semantic_polish_completion_tokens") or 0) + int(
         mixed_usage_update.get("segment_translation_completion_tokens") or 0,
     )
-    chat_usd_est = openai_transcribe_chat_provider_usd(chat_prompt_tot, chat_comp_tot)
+    groq_pt = int((groq_intel or {}).get("prompt_tokens") or 0) if groq_intel else 0
+    groq_ct = int((groq_intel or {}).get("completion_tokens") or 0) if groq_intel else 0
+    chat_usd_est = openai_transcribe_chat_provider_usd(chat_prompt_tot, chat_comp_tot) + groq_chat_provider_usd(
+        groq_pt, groq_ct
+    )
     provider_usd_total = whisper_usd_audio + chat_usd_est
     billed_transcribe_total_mru = transcribe_aggregate_billed_mru(provider_usd_total)
 
     payload: dict[str, Any] = {
+        "transcription_engine": transcription_engine,
         "transcript": verbatim,
         "timestamped_transcript": timestamped,
+        "asr_passages_annotated": build_asr_passages_annotated(
+            segments,
+            fallback_plain=verbatim,
+            fallback_end_sec=duration_sec,
+        ),
         "speech_language": speech_language,
         "semantic_polish_applied": semantic_polish_applied,
         "audio_preprocess_applied": audio_preprocess_applied,
@@ -1684,27 +1921,50 @@ def _build_transcribe_success_payload(
             "transcript_estimated_tokens": est_tokens,
             "whisper_duration_seconds": round(duration_sec, 3),
             "provider_usd_whisper_audio": round(whisper_usd_audio, 8),
-            "provider_usd_openai_chat_est": round(chat_usd_est, 10),
+            "provider_usd_openai_chat_est": round(
+                openai_transcribe_chat_provider_usd(chat_prompt_tot, chat_comp_tot), 10
+            ),
+            "provider_usd_groq_insight_est": round(groq_chat_provider_usd(groq_pt, groq_ct), 10),
             "provider_usd_transcribe_total": round(provider_usd_total, 10),
             "openai_chat_prompt_tokens_used": chat_prompt_tot,
             "openai_chat_completion_tokens_used": chat_comp_tot,
+            "groq_insight_prompt_tokens": groq_pt,
+            "groq_insight_completion_tokens": groq_ct,
             # Facturation utilisateur agrégée (pas seulement Whisper) pour compat ancien champ :
-            "billed_mru_whisper": round(billed_transcribe_total_mru, 6),
-            "billed_mru_transcription_total": round(billed_transcribe_total_mru, 6),
+            "billed_mru_whisper": float(billed_transcribe_total_mru),
+            "billed_mru_transcription_total": float(billed_transcribe_total_mru),
         },
     }
     if polish_usage_accum:
         payload["usage"].update(polish_usage_accum)
     if transcript_mixed_view is not None and mixed_usage_update:
         payload["usage"].update(mixed_usage_update)
+    if groq_intel:
+        payload["inferred_subject"] = groq_intel.get("inferred_subject") or ""
+        payload["deep_summary"] = groq_intel.get("deep_summary") or ""
+        payload["groq_insight_applied"] = True
+        if groq_intel.get("transcript_truncated"):
+            payload["groq_transcript_truncated"] = True
+    else:
+        payload["groq_insight_applied"] = False
     charge_units = billed_mru_to_wallet_units_debit(billed_transcribe_total_mru)
-    new_bal, charged = debit_credits(db, _auth, charge_units)
+    reserve = max(0, int(wallet_reserve_units_already_debited or 0))
+    new_bal: Optional[int] = None
+    if _auth is not None:
+        net = charge_units - reserve
+        if net > 0:
+            new_bal, _ = debit_credits(db, _auth, net)
+        elif net < 0:
+            new_bal, _ = credit_credits(db, _auth, -net)
+        else:
+            u0 = db.get(User, _auth.id)
+            new_bal = int(u0.credit_balance) if u0 else None
     if new_bal is not None:
         payload["wallet"] = {
             "balance_units": new_bal,
-            "spent_units": charged,
+            "spent_units": charge_units,
             "balance_mru": wallet_units_to_mru_display(new_bal),
-            "spent_mru_this_request": wallet_units_to_mru_display(charged),
+            "spent_mru_this_request": wallet_units_to_mru_display(charge_units),
         }
         payload["credits"] = payload["wallet"]
 
@@ -1745,8 +2005,10 @@ _ALLOWED_EXT_HELP = ", ".join(sorted(ext.lstrip(".").upper() for ext in ALLOWED_
 def _http_exc_detail_as_message(detail: Any) -> str:
     if isinstance(detail, str):
         s = detail.strip()
-        return s if s else "Requête refusée."
-    return str(detail).strip() or "Requête refusée."
+        base = s if s else "Requête refusée."
+    else:
+        base = str(detail).strip() or "Requête refusée."
+    return sanitize_user_visible_transcription_detail(base)
 
 
 def _materialize_transcribe_context_from_bytes(
@@ -1755,6 +2017,7 @@ def _materialize_transcribe_context_from_bytes(
     subject: str,
     speech_language_in: str,
     client_content_type_hint: Optional[str],
+    transcription_engine_in: str = "openai",
 ) -> dict[str, Any]:
     """
     Écrit le média sur disque, estime la durée, prépare les morceaux Whisper (FFmpeg possible — **bloquant**).
@@ -1762,8 +2025,10 @@ def _materialize_transcribe_context_from_bytes(
     """
     _reject_disallowed_hint_content_type(client_content_type_hint)
 
+    transcription_engine = _normalize_transcription_engine(transcription_engine_in)
+
     api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+    if transcription_engine != "local" and not api_key:
         raise HTTPException(
             status_code=500,
             detail="La clé technique de transcription est manquante sur le serveur.",
@@ -1771,7 +2036,7 @@ def _materialize_transcribe_context_from_bytes(
 
     speech_language = _normalize_speech_language(speech_language_in)
     whisper_prompt = _whisper_prompt(subject, speech_language)
-    client = openai.OpenAI(api_key=api_key)
+    client: Optional[openai.OpenAI] = openai.OpenAI(api_key=api_key) if api_key else None
 
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
         tmp.write(content)
@@ -1781,7 +2046,9 @@ def _materialize_transcribe_context_from_bytes(
     if estimated is not None:
         _reject_if_duration_exceeds(estimated)
 
-    whisper_chunks, chunk_temp_paths, audio_preprocess_single = _prepare_whisper_chunks(tmp_path, estimated)
+    whisper_chunks, chunk_temp_paths, audio_preprocess_single = _prepare_whisper_chunks(
+        tmp_path, estimated, transcription_engine=transcription_engine
+    )
     processed_mp3 = whisper_chunks[0][0] if len(whisper_chunks) == 1 and audio_preprocess_single else None
 
     return {
@@ -1794,6 +2061,7 @@ def _materialize_transcribe_context_from_bytes(
         "speech_language": speech_language,
         "estimated": estimated,
         "audio_preprocess_single_file": audio_preprocess_single,
+        "transcription_engine": transcription_engine,
     }
 
 
@@ -1801,6 +2069,7 @@ async def _load_transcribe_context(
     file: UploadFile,
     subject: str,
     speech_language_in: str,
+    transcription_engine_in: str = "openai",
 ) -> dict[str, Any]:
     _reject_disallowed_media_type(file)
     ext = os.path.splitext(file.filename or "")[1].lower()
@@ -1830,6 +2099,7 @@ async def _load_transcribe_context(
         subject,
         speech_language_in,
         file.content_type,
+        transcription_engine_in,
     )
 
 
@@ -1839,6 +2109,7 @@ def _load_transcribe_context_from_path(
     subject: str,
     speech_language_in: str,
     *,
+    transcription_engine_in: str = "openai",
     hint_content_type: Optional[str] = None,
 ) -> dict[str, Any]:
     """Comme `_load_transcribe_context`, mais fichier déjà sur disque (jobs en arrière-plan)."""
@@ -1868,8 +2139,10 @@ def _load_transcribe_context_from_path(
             ),
         )
 
+    transcription_engine = _normalize_transcription_engine(transcription_engine_in)
+
     api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+    if transcription_engine != "local" and not api_key:
         raise HTTPException(
             status_code=500,
             detail="La clé technique de transcription est manquante sur le serveur.",
@@ -1877,14 +2150,16 @@ def _load_transcribe_context_from_path(
 
     speech_language = _normalize_speech_language(speech_language_in)
     whisper_prompt = _whisper_prompt(subject, speech_language)
-    client = openai.OpenAI(api_key=api_key)
+    client = openai.OpenAI(api_key=api_key) if api_key else None
     tmp_path = rp
 
     estimated = _estimated_duration_seconds_from_file(tmp_path)
     if estimated is not None:
         _reject_if_duration_exceeds(estimated)
 
-    whisper_chunks, chunk_temp_paths, audio_preprocess_single = _prepare_whisper_chunks(tmp_path, estimated)
+    whisper_chunks, chunk_temp_paths, audio_preprocess_single = _prepare_whisper_chunks(
+        tmp_path, estimated, transcription_engine=transcription_engine
+    )
     processed_mp3 = whisper_chunks[0][0] if len(whisper_chunks) == 1 and audio_preprocess_single else None
 
     return {
@@ -1897,6 +2172,7 @@ def _load_transcribe_context_from_path(
         "speech_language": speech_language,
         "estimated": estimated,
         "audio_preprocess_single_file": audio_preprocess_single,
+        "transcription_engine": transcription_engine,
     }
 
 
@@ -1907,15 +2183,24 @@ async def transcribe_audio(
     file: UploadFile = File(...),
     subject: str = Form(default="General"),
     speech_language: str = Form(default="fr"),
+    transcription_engine: str = Form(default="openai"),
 ):
-    ctx = await _load_transcribe_context(file, subject, speech_language)
+    ctx = await _load_transcribe_context(file, subject, speech_language, transcription_engine)
     try:
-        response = _call_whisper_transcription_merged(
-            ctx["client"],
-            ctx["whisper_chunks"],
-            ctx["speech_language"],
-            ctx["whisper_prompt"],
-        )
+        if ctx.get("transcription_engine") == "local":
+            response = _call_local_whisper_merged(
+                ctx["whisper_chunks"],
+                ctx["speech_language"],
+                ctx["whisper_prompt"],
+            )
+        else:
+            assert ctx["client"] is not None
+            response = _call_whisper_transcription_merged(
+                ctx["client"],
+                ctx["whisper_chunks"],
+                ctx["speech_language"],
+                ctx["whisper_prompt"],
+            )
         n_chunks = len(ctx["whisper_chunks"])
         payload = _build_transcribe_success_payload(
             db=db,
@@ -1927,8 +2212,17 @@ async def transcribe_audio(
             filename=file.filename,
             audio_preprocess_applied=bool(ctx.get("audio_preprocess_single_file")),
             whisper_chunk_count=n_chunks,
+            transcription_engine=str(ctx.get("transcription_engine") or "openai"),
         )
         return JSONResponse(payload)
+    except RuntimeError as e:
+        logger.warning("LOCAL_WHISPER: %s", e, exc_info=True)
+        raw = str(e).strip()
+        if not raw:
+            detail_raw = "Transcription locale indisponible (dépendances ou modèle manquant sur le serveur)."
+        else:
+            detail_raw = sanitize_user_visible_transcription_detail(raw)
+        raise HTTPException(status_code=503, detail=detail_raw) from None
     except openai.AuthenticationError:
         logger.error("OpenAI AuthenticationError sur /transcribe.", exc_info=False)
         raise HTTPException(
@@ -1976,6 +2270,19 @@ async def transcribe_audio(
             status_code=500,
             detail="La transcription a échoué. Vérifie le fichier puis réessaie ; si ça persiste, réessaie plus tard.",
         )
+    except HTTPException:
+        raise
+    except Exception as e:
+        if str(ctx.get("transcription_engine")) != "local":
+            raise
+        logger.warning("LOCAL_WHISPER erreur sur /transcribe", exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                str(e).strip()[:550]
+                or "Transcription locale impossible sur le serveur — vérifie les dépendances (openai-whisper, torch, ffmpeg)."
+            ),
+        ) from None
     finally:
         _cleanup_transcription_tempfiles(
             ctx["tmp_path"],
@@ -2013,17 +2320,23 @@ async def iterate_transcription_events(
     subject: str,
     display_filename: Optional[str],
     whisper_rt: float,
+    ui_locale: str = "fr",
 ) -> AsyncIterator[dict[str, Any]]:
     """Événements NDJSON (dict) — partagés par `/transcribe-stream` et les jobs persistants."""
+    loc = _normalize_ui_locale(ui_locale)
     yield {
         "type": "status",
         "phase": "received",
-        "message": "Fichier reçu sur le serveur.",
+        "message": _ui_text(loc, "Fichier reçu sur le serveur.", "تم استلام الملف على الخادم."),
         "server_frac": 0.03,
     }
 
     estimated = ctx["estimated"]
-    prep_msg = "Préparation de l’audio sur le serveur (normalisation, découpage si nécessaire)…"
+    prep_msg = _ui_text(
+        loc,
+        "Préparation de l’audio sur le serveur (normalisation, découpage si nécessaire)…",
+        "جارٍ تجهيز الصوت على الخادم (التطبيع، والتقطيع عند الحاجة)…",
+    )
     yield {
         "type": "status",
         "phase": "preprocessing",
@@ -2037,7 +2350,9 @@ async def iterate_transcription_events(
     responses_acc: list[Any] = []
     offsets_acc: list[float] = []
     total_est = estimated if estimated is not None and estimated > 0 else 120.0
-    expected_whisper_total = max(25.0, total_est * whisper_rt * (1.05 + 0.08 * max(0, n_chunks - 1)))
+    is_local_ctx = ctx.get("transcription_engine") == "local"
+    rt_eff = float(_lw_addon.whisper_progress_rt_factor_local()) if is_local_ctx else float(whisper_rt)
+    expected_whisper_total = max(25.0, total_est * rt_eff * (1.05 + 0.08 * max(0, n_chunks - 1)))
     t_whisper_start = time.monotonic()
 
     for idx, (part_path, t_off) in enumerate(chunks):
@@ -2045,22 +2360,37 @@ async def iterate_transcription_events(
             yield {
                 "type": "status",
                 "phase": "whisper_chunk",
-                "message": f"Transcription en cours — partie {idx + 1}/{n_chunks}…",
+                "message": _ui_text(
+                    loc,
+                    f"Transcription en cours — partie {idx + 1}/{n_chunks}…",
+                    f"جارٍ النسخ — الجزء {idx + 1}/{n_chunks}…",
+                ),
                 "server_frac": round(0.10 + 0.50 * (idx / max(1, n_chunks)), 4),
                 "whisper_chunk_index": idx + 1,
                 "whisper_chunk_total": n_chunks,
             }
 
-        task = asyncio.create_task(
-            asyncio.to_thread(
-                _call_whisper_transcription,
-                ctx["client"],
-                part_path,
-                ctx["speech_language"],
-                ctx["whisper_prompt"],
-            ),
-        )
-        chunk_est = max(20.0, (total_est / max(1, n_chunks)) * whisper_rt * 1.2)
+        if is_local_ctx:
+            task = asyncio.create_task(
+                asyncio.to_thread(
+                    _lw_addon.transcribe_verbose_one_chunk,
+                    part_path,
+                    ctx["speech_language"],
+                    ctx["whisper_prompt"],
+                ),
+            )
+        else:
+            assert ctx["client"] is not None
+            task = asyncio.create_task(
+                asyncio.to_thread(
+                    _call_whisper_transcription,
+                    ctx["client"],
+                    part_path,
+                    ctx["speech_language"],
+                    ctx["whisper_prompt"],
+                ),
+            )
+        chunk_est = max(20.0, (total_est / max(1, n_chunks)) * rt_eff * 1.2)
         t_chunk_start = time.monotonic()
         while True:
             done, _ = await asyncio.wait({task}, timeout=0.52, return_when=asyncio.FIRST_COMPLETED)
@@ -2076,14 +2406,26 @@ async def iterate_transcription_events(
                 "type": "status",
                 "phase": "whisper",
                 "message": (
-                    f"Écoute et transcription — partie {idx + 1}/{n_chunks}…"
+                    _ui_text(
+                        loc,
+                        f"Écoute et transcription — partie {idx + 1}/{n_chunks}…",
+                        f"استماع ونسخ — الجزء {idx + 1}/{n_chunks}…",
+                    )
                     if n_chunks > 1
-                    else "Écoute et transcription de l’audio…"
+                    else _ui_text(loc, "Écoute et transcription de l’audio…", "جارٍ الاستماع ونسخ الصوت…")
                 ),
                 "estimate_note": (
-                    f"Temps restant estimé ≈ {expected_whisper_total:.0f}s."
+                    _ui_text(
+                        loc,
+                        f"Temps restant estimé ≈ {expected_whisper_total:.0f}s.",
+                        f"الوقت المتبقي المقدَّر ≈ {expected_whisper_total:.0f} ث.",
+                    )
                     if n_chunks == 1
-                    else f"Partie {idx + 1}/{n_chunks} · durée totale estimée ≈ {expected_whisper_total:.0f}s."
+                    else _ui_text(
+                        loc,
+                        f"Partie {idx + 1}/{n_chunks} · durée totale estimée ≈ {expected_whisper_total:.0f}s.",
+                        f"الجزء {idx + 1}/{n_chunks} · المدة الإجمالية المقدَّرة ≈ {expected_whisper_total:.0f} ث.",
+                    )
                 ),
                 "server_frac": round(server_frac, 4),
                 "whisper_elapsed_sec": round(elapsed_wh, 1),
@@ -2093,6 +2435,18 @@ async def iterate_transcription_events(
 
         try:
             r_part = task.result()
+        except RuntimeError as e:
+            logger.warning("LOCAL_WHISPER stream chunk: %s", e, exc_info=True)
+            raw_chunk = str(e).strip()
+            yield {
+                "type": "error",
+                "detail": (
+                    sanitize_user_visible_transcription_detail(raw_chunk)
+                    if raw_chunk
+                    else "Transcription locale indisponible (dépendances ou modèle manquant sur le serveur)."
+                ),
+            }
+            return
         except openai.AuthenticationError:
             logger.error("OpenAI AuthenticationError sur /transcribe-stream.", exc_info=False)
             yield {"type": "error", "detail": "Service de transcription indisponible (configuration serveur). Réessaie plus tard."}
@@ -2110,11 +2464,27 @@ async def iterate_transcription_events(
             logger.warning("OpenAI APIStatusError transcription stream status=%s", sc)
             yield {"type": "error", "detail": _ndjson_detail_for_openai_status(e)}
             return
-        except openai.OpenAIError as e:
+        except openai.OpenAIError:
             logger.exception("OpenAI erreur générique transcription stream", exc_info=True)
             yield {
                 "type": "error",
                 "detail": "La transcription a échoué — vérifie le fichier et réessaie plus tard.",
+            }
+            return
+        except Exception as exc:
+            if not is_local_ctx:
+                logger.exception("Transcription chunk inattendue (mode cloud)")
+                yield {
+                    "type": "error",
+                    "detail": "Échec inattendu pendant la transcription — réessaie plus tard.",
+                }
+                return
+            logger.warning("LOCAL_WHISPER chunk: erreur locale", exc_info=True)
+            yield {
+                "type": "error",
+                "detail": sanitize_user_visible_transcription_detail(
+                    str(exc).strip() or "Échec de la transcription locale sur le serveur."
+                ),
             }
             return
 
@@ -2123,14 +2493,33 @@ async def iterate_transcription_events(
 
     response = _merge_whisper_verbose_responses(responses_acc, offsets_acc)
 
-    yield {"type": "status", "phase": "whisper_complete", "message": "Transcription audio terminée.", "server_frac": 0.68}
+    yield {
+        "type": "status",
+        "phase": "whisper_complete",
+        "message": _ui_text(loc, "Transcription audio terminée.", "اكتمل نسخ الصوت."),
+        "server_frac": 0.68,
+    }
 
     api_text_preview = (getattr(response, "text", None) or "").strip()
     if len(api_text_preview) > 1600:
         api_text_preview = api_text_preview[:1600].rstrip() + "…"
-    yield {"type": "preview", "text": api_text_preview, "server_frac": 0.72, "message": "Aperçu du texte — finalisation en cours."}
+    yield {
+        "type": "preview",
+        "text": api_text_preview,
+        "server_frac": 0.72,
+        "message": _ui_text(loc, "Aperçu du texte — finalisation en cours.", "معاينة النص — جارٍ الإنهاء."),
+    }
 
-    yield {"type": "status", "phase": "post_process", "message": "Repères temporels, langue et options d’affichage…", "server_frac": 0.80}
+    yield {
+        "type": "status",
+        "phase": "post_process",
+        "message": _ui_text(
+            loc,
+            "Repères temporels, langue et options d’affichage…",
+            "العلامات الزمنية، اللغة وخيارات العرض…",
+        ),
+        "server_frac": 0.80,
+    }
 
     try:
         payload = _build_transcribe_success_payload(
@@ -2143,6 +2532,8 @@ async def iterate_transcription_events(
             filename=display_filename,
             audio_preprocess_applied=bool(ctx.get("audio_preprocess_single_file")),
             whisper_chunk_count=len(ctx["whisper_chunks"]),
+            transcription_engine=str(ctx.get("transcription_engine") or "openai"),
+            wallet_reserve_units_already_debited=int(ctx.get("wallet_reserve_units") or 0),
         )
     except openai.AuthenticationError:
         yield {"type": "error", "detail": "Impossible de finaliser la transcription (service indisponible). Réessaie plus tard."}
@@ -2178,10 +2569,13 @@ async def transcribe_audio_stream(
     file: UploadFile = File(...),
     subject: str = Form(default="General"),
     speech_language: str = Form(default="fr"),
+    transcription_engine: str = Form(default="openai"),
+    ui_locale: str = Form(default="fr"),
 ):
     """NDJSON lignes `{type,...}` puis `done` avec le même `result` que `/transcribe`."""
     whisper_rt = float(os.getenv("WHISPER_PROGRESS_RT_FACTOR", "0.5"))
     prep_heartbeat_sec = float(os.getenv("TRANSCRIBE_STREAM_PREP_HEARTBEAT_SEC", "12"))
+    stream_ui_loc = _normalize_ui_locale(ui_locale)
 
     async def event_iter() -> AsyncIterator[bytes]:
         ctx: Optional[dict[str, Any]] = None
@@ -2192,9 +2586,11 @@ async def transcribe_audio_stream(
                 {
                     "type": "status",
                     "phase": "accepted",
-                    "message": (
+                    "message": _ui_text(
+                        stream_ui_loc,
                         "Requête acceptée — préparation du média sur le serveur "
-                        "(plusieurs minutes possibles pour les fichiers longs)."
+                        "(plusieurs minutes possibles pour les fichiers longs).",
+                        "تم قبول الطلب — جارٍ تجهيز الوسيط على الخادم (قد يستغرق ذلك عدة دقائق للملفات الطويلة).",
                     ),
                     "server_frac": 0.02,
                 },
@@ -2232,7 +2628,11 @@ async def transcribe_audio_stream(
                 {
                     "type": "status",
                     "phase": "preprocessing",
-                    "message": "Préparation de l’audio — merci de garder cet onglet ouvert…",
+                    "message": _ui_text(
+                        stream_ui_loc,
+                        "Préparation de l’audio — merci de garder cet onglet ouvert…",
+                        "جارٍ تجهيز الصوت — يُرجى إبقاء هذا التبويب مفتوحًا…",
+                    ),
                     "server_frac": 0.06,
                 },
             )
@@ -2246,6 +2646,7 @@ async def transcribe_audio_stream(
                     subject,
                     speech_language,
                     hint_ct,
+                    transcription_engine,
                 ),
             )
             hb_timeout = max(4.0, prep_heartbeat_sec)
@@ -2261,7 +2662,11 @@ async def transcribe_audio_stream(
                     {
                         "type": "status",
                         "phase": "preprocessing",
-                        "message": "Analyse de l’audio toujours en cours sur le serveur…",
+                        "message": _ui_text(
+                            stream_ui_loc,
+                            "Analyse de l’audio toujours en cours sur le serveur…",
+                            "ما زال تحليل الصوت جارٍ على الخادم…",
+                        ),
                         "server_frac": 0.07,
                     },
                 )
@@ -2279,6 +2684,7 @@ async def transcribe_audio_stream(
                 subject=subject,
                 display_filename=file.filename,
                 whisper_rt=whisper_rt,
+                ui_locale=stream_ui_loc,
             ):
                 yield _ndjson_line(ev)
         except HTTPException as e:

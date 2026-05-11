@@ -10,6 +10,16 @@ from database import Base
 
 
 class User(Base):
+    """Utilisateur applicatif.
+
+    **Portefeuille (`credit_balance`)** — Le solde en base est un **entier d’unités** (pas de fraction
+    stockée en colonne). Sémantique : unités ≈ ``MRU_affiché × MRU_WALLET_MICRO`` (voir ``pricing``).
+    On ne peut pas représenter une fraction d’unité sans changer le schéma (ex. BIGINT + échelle,
+    ou table d’écritures en sous-unités) ou sans **augmenter** ``MRU_WALLET_MICRO`` dans l’environnement
+    pour réduire l’erreur de quantification. La conversion MRU → unités côté code utilise un arrondi
+    **demi au plus proche** (compromis neutre : ni ``ceil`` systématique, ni ``floor`` biais client).
+    """
+
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -20,7 +30,16 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-    credit_balance: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
+    credit_balance: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default="0",
+        default=0,
+        comment=(
+            "Solde portefeuille en unités entières (pas de fraction en base). "
+            "MRU affiché ≈ credit_balance / MRU_WALLET_MICRO ; quantification et arrondi : voir pricing.py."
+        ),
+    )
     credits_expire_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
@@ -61,6 +80,8 @@ class TranscriptionJob(Base):
     original_filename: Mapped[str] = mapped_column(String(384), nullable=False)
     subject: Mapped[str] = mapped_column(String(512), nullable=False, server_default="General")
     speech_language: Mapped[str] = mapped_column(String(16), nullable=False, server_default="fr")
+    ui_locale: Mapped[str] = mapped_column(String(16), nullable=False, server_default="fr")
+    transcription_engine: Mapped[str] = mapped_column(String(24), nullable=False, server_default="openai")
     input_relpath: Mapped[str] = mapped_column(String(512), nullable=False)
     client_content_type: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
 
@@ -72,6 +93,8 @@ class TranscriptionJob(Base):
 
     result_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Réserve portefeuille (unités wallet) débitée au passage « queued → processing » si TRANSCRIBE_JOB_WALLET_HOLD ; libérée ou soldée au résultat.
+    wallet_reserved_units: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

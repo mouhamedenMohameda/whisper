@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ENGINE_TRANSCRIPTION } from "../branding.js";
-import { listTranscriptionJobs } from "../utils/api.js";
+import { cancelTranscriptionJob, listTranscriptionJobs } from "../utils/api.js";
 import { forgetBgTranscribeJobId, loadBgTranscribeJobIds } from "../utils/bgTranscribeJobsStorage.js";
 import { userFacingTranscriptionJobFailure } from "../utils/transcribeUserMessages.js";
 
@@ -26,13 +26,25 @@ function formatDurMin(sec, under1m) {
 
 /**
  * Liste serveur alignée avec un tableau type « fichier récent » ; le pourcentage vient du serveur (reprise après rechargement ou autre appareil lorsque même compte).
+ *
+ * @param {{ authReady: boolean; onOpenJob?: (row: Record<string, unknown>) => void; onWalletUpdated?: () => void }} props
  */
-export default function BgTranscribeJobsPanel({ authReady }) {
+export default function BgTranscribeJobsPanel({ authReady, onOpenJob, onWalletUpdated }) {
   const { t } = useTranslation();
   const [rows, setRows] = useState([]);
   const [err, setErr] = useState("");
 
   const trackedLocalIds = useMemo(() => loadBgTranscribeJobIds(), [rows]);
+
+  async function reloadList() {
+    try {
+      setErr("");
+      const items = await listTranscriptionJobs();
+      setRows(items);
+    } catch (e) {
+      setErr(e?.message ? String(e.message) : String(e || ""));
+    }
+  }
 
   useEffect(() => {
     if (!authReady) return undefined;
@@ -80,6 +92,11 @@ export default function BgTranscribeJobsPanel({ authReady }) {
           </span>
         )}
       </div>
+      {!err && typeof onOpenJob === "function" ? (
+        <p className="border-b border-slate-200/70 px-5 py-2 text-[11px] leading-relaxed text-slate-600 dark:border-slate-800 dark:text-slate-400">
+          {t("bgJobs.serverPersistHint")} {t("bgJobs.clickRowsHint")}
+        </p>
+      ) : null}
       {err ? (
         <p className="px-5 py-4 text-xs text-rose-600 dark:text-rose-400">{err}</p>
       ) : (
@@ -100,8 +117,37 @@ export default function BgTranscribeJobsPanel({ authReady }) {
                 const name = String(r.original_filename || "").trim() || "Audio";
                 const pct = typeof r.progress_percent === "number" ? r.progress_percent : 0;
                 const isTrackedHere = trackedLocalIds.includes(String(r.job_id));
+                const canOpen = typeof onOpenJob === "function";
+                const rowKey = String(r.job_id);
+                const activate = () => {
+                  if (!canOpen) return;
+                  /** @type {Record<string, unknown>} */
+                  const row = typeof r === "object" && r !== null ? /** @type {Record<string, unknown>} */ (r) : {};
+                  onOpenJob(row);
+                };
                 return (
-                  <tr key={String(r.job_id)} className="text-slate-700 dark:text-slate-300">
+                  <tr
+                    key={rowKey}
+                    className={`text-slate-700 dark:text-slate-300 ${
+                      canOpen
+                        ? "cursor-pointer hover:bg-slate-50/95 focus-within:bg-slate-50/95 dark:hover:bg-slate-800/40 dark:focus-within:bg-slate-800/40"
+                        : ""
+                    }`}
+                    role={canOpen ? "button" : undefined}
+                    tabIndex={canOpen ? 0 : undefined}
+                    aria-label={canOpen ? t("bgJobs.rowAria", { name }) : undefined}
+                    onClick={canOpen ? () => void activate() : undefined}
+                    onKeyDown={
+                      canOpen
+                        ? (ev) => {
+                            if (ev.key === "Enter" || ev.key === " ") {
+                              ev.preventDefault();
+                              void activate();
+                            }
+                          }
+                        : undefined
+                    }
+                  >
                     <td className="max-w-[14rem] truncate px-3 py-2 font-medium text-slate-900 dark:text-white">
                       {name}
                     </td>
@@ -124,6 +170,50 @@ export default function BgTranscribeJobsPanel({ authReady }) {
                       ) : st === "failed" ? (
                         <span className="max-w-[14rem] text-xs text-rose-600 dark:text-rose-400">
                           {userFacingTranscriptionJobFailure(r.error_detail, r.message, t)}
+                        </span>
+                      ) : st === "cancelled" ? (
+                        <span className="text-slate-500 dark:text-slate-400" title={t("bgJobs.cancelledTitle")}>
+                          {t("bgJobs.cancelledBadge")}
+                        </span>
+                      ) : st === "queued" ? (
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span
+                            className="tabular-nums text-slate-600 dark:text-slate-300"
+                            title={t("bgJobs.queuedTitle")}
+                          >
+                            {t("bgJobs.queuedBadge")}
+                          </span>
+                          <button
+                            type="button"
+                            className="rounded-lg border border-slate-200/90 bg-white/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-700 shadow-sm hover:bg-white dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              void (async () => {
+                                try {
+                                  await cancelTranscriptionJob(rowKey);
+                                  forgetBgTranscribeJobId(rowKey);
+                                  await reloadList();
+                                  if (typeof onWalletUpdated === "function") onWalletUpdated();
+                                  window.dispatchEvent(
+                                    new CustomEvent("lecturai-toast", {
+                                      detail: { msg: t("bgJobs.cancelOk"), type: "success" },
+                                    }),
+                                  );
+                                } catch (ce) {
+                                  window.dispatchEvent(
+                                    new CustomEvent("lecturai-toast", {
+                                      detail: {
+                                        msg: ce?.message ? String(ce.message) : t("bgJobs.cancelFail"),
+                                        type: "error",
+                                      },
+                                    }),
+                                  );
+                                }
+                              })();
+                            }}
+                          >
+                            {t("bgJobs.cancelJob")}
+                          </button>
                         </span>
                       ) : (
                         <span

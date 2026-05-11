@@ -1,0 +1,7 @@
+# Optionnel : transcription locale (TRANSCRIBE_LOCAL_WHISPER_ENABLED=true).
+# Installe en plus du requirements.txt principal. openai-whisper tire torch comme dépendance.
+# VPS CPU seulement : souvent plus fiable d’installer PyTorch CPU d’abord, puis whisper :
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install openai-whisper>=20231117
+# Si « Connection reset by peer » : réessaie, --retries 10 --timeout 120, ou autre réseau/VPN.
+openai-whisper>=20231117

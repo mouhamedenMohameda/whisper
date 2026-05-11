@@ -172,6 +172,8 @@ export class TranscriptionJobFailedError extends Error {
 }
 
 /** @typedef {{
+ *   transcriptionEngine?: "openai" | "local" | string;
+ *   uiLocale?: string;
  *   onUploadProgress?: (uploadFrac0to1: number) => void;
  *   onUploadComplete?: () => void;
  *   onStreamEvent?: (ev: Record<string, unknown>) => void;
@@ -186,12 +188,22 @@ export function transcribeWithXHR(file, subject, speechLanguage, handlers) {
   /** @type {string} */
   const lang = speechLanguage === "ar" ? "ar" : "fr";
 
+  /** @type {string} */
+  const engineRaw =
+    handlers && typeof handlers === "object" && typeof handlers.transcriptionEngine === "string"
+      ? handlers.transcriptionEngine
+      : "openai";
+  const transcription_engine = engineRaw.trim().toLowerCase() === "local" ? "local" : "openai";
+
   /** @type {TranscribeProgressHandlers} */
   let h = {};
   const legacyCombined = typeof handlers === "function" ? /** @type {(n: number) => void} */ (handlers) : null;
   if (handlers && typeof handlers === "object") {
     h = handlers;
   }
+
+  const ui_locale =
+    typeof h.uiLocale === "string" && h.uiLocale.trim().toLowerCase().replace(/-/g, "_").startsWith("ar") ? "ar" : "fr";
 
   let uploadFrac = 0;
   let uploadComplete = false;
@@ -327,7 +339,7 @@ export function transcribeWithXHR(file, subject, speechLanguage, handlers) {
             msg +=
               " — Souvent le reverse-proxy (Nginx) : augmente proxy_read_timeout et proxy_send_timeout sur /api/transcribe-stream (ex. 3600s), proxy_buffering off, et client_body_timeout si l’upload est lent.";
           } else if (xhr.status >= 500) {
-            msg += ` Code HTTP ${xhr.status}. Vérifie les journaux du backend (uvicorn).`;
+            msg += ` Code HTTP ${xhr.status}. Vérifie les journaux du serveur LecturAI.`;
           } else if (xhr.status) {
             msg += ` (HTTP ${xhr.status})`;
           }
@@ -363,6 +375,8 @@ export function transcribeWithXHR(file, subject, speechLanguage, handlers) {
     fd.append("file", file);
     fd.append("subject", subject || "General");
     fd.append("speech_language", lang);
+    fd.append("transcription_engine", transcription_engine);
+    fd.append("ui_locale", ui_locale);
     xhr.send(fd);
   });
 }
@@ -375,12 +389,18 @@ export function transcribeWithXHR(file, subject, speechLanguage, handlers) {
 export function enqueueTranscribeJobWithXHR(file, subject, speechLanguage, handlers = {}) {
   /** @type {string} */
   const lang = speechLanguage === "ar" ? "ar" : "fr";
+  /** @type {string} */
+  const engineRaw = typeof handlers.transcriptionEngine === "string" ? handlers.transcriptionEngine : "openai";
+  const transcription_engine = engineRaw.trim().toLowerCase() === "local" ? "local" : "openai";
   /** @type {TranscribeProgressHandlers} */
   let h = {};
   const legacyCombined = typeof handlers === "function" ? /** @type {(n: number) => void} */ (handlers) : null;
   if (handlers && typeof handlers === "object") {
     h = handlers;
   }
+
+  const ui_locale =
+    typeof h.uiLocale === "string" && h.uiLocale.trim().toLowerCase().replace(/-/g, "_").startsWith("ar") ? "ar" : "fr";
 
   let uploadFrac = 0;
   let uploadComplete = false;
@@ -489,6 +509,8 @@ export function enqueueTranscribeJobWithXHR(file, subject, speechLanguage, handl
     fd.append("file", file);
     fd.append("subject", subject || "General");
     fd.append("speech_language", lang);
+    fd.append("transcription_engine", transcription_engine);
+    fd.append("ui_locale", ui_locale);
     xhr.send(fd);
   });
 }
@@ -553,11 +575,83 @@ export async function listTranscriptionJobs() {
   return Array.isArray(data?.items) ? data.items : [];
 }
 
-export async function generateLesson(transcript, subject) {
+/**
+ * @param {string} jobId
+ * @param {{ include_result?: boolean; signal?: AbortSignal }} [opts]
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function getTranscriptionJob(jobId, opts = {}) {
+  const { include_result = false, signal } = opts;
+  const qs = include_result ? "include_result=true" : "include_result=false";
+  const res = await fetch(`${apiUrl("/api/transcribe-jobs/")}${encodeURIComponent(jobId)}?${qs}`, {
+    headers: getAuthHeaders(false),
+    signal,
+  });
+  const { ok, data, errorMessage } = await parseJsonResponse(res);
+  if (!ok || !data || typeof data !== "object") {
+    throw new Error(errorMessage || "Impossible de lire cette tâche de transcription.");
+  }
+  return /** @type {Record<string, unknown>} */ (data);
+}
+
+/** Annule un job encore en file (statut `queued` uniquement). */
+export async function cancelTranscriptionJob(jobId) {
+  const res = await fetch(`${apiUrl("/api/transcribe-jobs/")}${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST",
+    headers: getAuthHeaders(true),
+  });
+  const { ok, data, errorMessage } = await parseJsonResponse(res);
+  if (!ok) throw new Error(errorMessage || "Annulation impossible.");
+  return data;
+}
+
+/**
+ * @param {string} transcript
+ * @param {string} subject
+ * @param {Record<string, unknown> | null | undefined} [transcriptMixedView] repli si pas d’ASR annoté
+ * @param {unknown[] | null | undefined} [asrPassagesAnnotated] passages ASR annotés (prioritaire pour la génération)
+ */
+/**
+ * Synthèse + sujet d’aide à la lecture (optionnel, après transcription).
+ * @param {string} transcript
+ * @param {string} subject
+ * @param {"fr"|"ar"|string} speechLanguage
+ */
+export async function requestTranscriptInsight(transcript, subject, speechLanguage) {
+  const res = await fetch(apiUrl("/api/transcript-insight"), {
+    method: "POST",
+    headers: getAuthHeaders(true),
+    body: JSON.stringify({
+      transcript,
+      subject: subject || "General",
+      speech_language: speechLanguage === "ar" ? "ar" : "fr",
+    }),
+  });
+  const { ok, data, errorMessage } = await parseJsonResponse(res);
+  if (!ok || !data || typeof data !== "object") {
+    throw new Error(errorMessage || "Analyse indisponible.");
+  }
+  return /** @type {Record<string, unknown>} */ (data);
+}
+
+export async function generateLesson(transcript, subject, transcriptMixedView, asrPassagesAnnotated, uiLanguage) {
+  const body = {
+    transcript,
+    subject: subject || "General",
+  };
+  if (typeof uiLanguage === "string" && uiLanguage.trim()) {
+    body.language = uiLanguage.trim().toLowerCase().startsWith("ar") ? "ar" : "fr";
+  }
+  if (Array.isArray(asrPassagesAnnotated) && asrPassagesAnnotated.length > 0) {
+    body.asr_passages_annotated = asrPassagesAnnotated;
+  }
+  if (transcriptMixedView && typeof transcriptMixedView === "object") {
+    body.transcript_mixed_view = transcriptMixedView;
+  }
   const res = await fetch(apiUrl("/api/generate"), {
     method: "POST",
     headers: getAuthHeaders(true),
-    body: JSON.stringify({ transcript, subject: subject || "General" }),
+    body: JSON.stringify(body),
   });
   const { ok, data, errorMessage } = await parseJsonResponse(res);
   if (!ok) throw new Error(errorMessage || "Génération impossible.");

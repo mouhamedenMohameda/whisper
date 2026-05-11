@@ -1,3 +1,5 @@
+"""Débits et crédits sur ``User.credit_balance`` (entier d’unités ; sémantique et arrondi MRU → unités : ``models.User``, ``pricing``)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -61,3 +63,20 @@ def debit_credits(db: Session, user: Optional[User], amount: int) -> Tuple[Optio
     db.commit()
     db.refresh(u)
     return u.credit_balance, amount
+
+
+def credit_credits(db: Session, user: Optional[User], amount: int) -> Tuple[Optional[int], int]:
+    """
+    Crédite le portefeuille (remboursement / libération de réserve). Pas de contrôle d’expiration.
+    Retourne (nouveau solde ou None), montant réellement ajouté.
+    """
+    if user is None or amount <= 0:
+        return None, 0
+    u = db.get(User, user.id)
+    if not u:
+        return None, 0
+    u.credit_balance += int(amount)
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u.credit_balance, int(amount)

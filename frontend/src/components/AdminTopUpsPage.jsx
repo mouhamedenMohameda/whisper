@@ -11,6 +11,8 @@ const STATUS_FR = {
   rejected: "Refusée",
 };
 
+const USERS_PAGE_SIZE = 50;
+
 /** @typedef {{ grantMode: "usd"|"mru", supplierUsd: string, directMru: string, extendDays: string, approveNote: string, rejectNote: string }} RowDraft */
 
 const defaultDraft = () => ({
@@ -86,6 +88,16 @@ export default function AdminTopUpsPage({ onBack }) {
   const [manualDraft, setManualDraft] = useState(() => defaultDraft());
   const [manualBusy, setManualBusy] = useState(false);
 
+  /** @type {["topups" | "users", (v: "topups" | "users") => void]} */
+  const [adminSection, setAdminSection] = useState("topups");
+  const [usersFilterInput, setUsersFilterInput] = useState("");
+  const [usersDebouncedFilter, setUsersDebouncedFilter] = useState("");
+  const [usersLoading, setUsersLoading] = useState(false);
+  /** @type {[Array<{ id: number; email: string; is_admin?: boolean; balance_mru_approx?: number; credit_balance?: number; credits_expire_at?: string | null; created_at?: string | null }>, (v: any) => void]} */
+  const [usersRows, setUsersRows] = useState([]);
+  const [usersTotal, setUsersTotal] = useState(0);
+  const [usersOffset, setUsersOffset] = useState(0);
+
   const patchDraft = (id, patch) => {
     setDraftById((prev) => {
       const row = prev[id] ?? defaultDraft();
@@ -114,8 +126,50 @@ export default function AdminTopUpsPage({ onBack }) {
   }, [filter]);
 
   useEffect(() => {
+    if (adminSection !== "topups") return;
     reload();
-  }, [reload]);
+  }, [reload, adminSection]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setUsersDebouncedFilter(usersFilterInput.trim()), 360);
+    return () => clearTimeout(t);
+  }, [usersFilterInput]);
+
+  useEffect(() => {
+    setUsersOffset(0);
+  }, [usersDebouncedFilter]);
+
+  useEffect(() => {
+    if (adminSection !== "users") return;
+    let cancelled = false;
+    (async () => {
+      setUsersLoading(true);
+      try {
+        const qs = new URLSearchParams({
+          limit: String(USERS_PAGE_SIZE),
+          offset: String(usersOffset),
+        });
+        if (usersDebouncedFilter.length >= 2) qs.set("q", usersDebouncedFilter);
+        const res = await fetch(apiUrl(`/api/admin/users?${qs}`), { headers: getAuthHeaders(false) });
+        const p = await parseJsonResponse(res);
+        if (cancelled) return;
+        if (!p.ok) throw new Error(p.errorMessage || "Liste des comptes inaccessible.");
+        setUsersRows(Array.isArray(p.data.users) ? p.data.users : []);
+        setUsersTotal(typeof p.data.total === "number" ? p.data.total : 0);
+      } catch (e) {
+        if (!cancelled) {
+          setUsersRows([]);
+          setUsersTotal(0);
+          toast(e?.message || "Erreur de chargement", "error");
+        }
+      } finally {
+        if (!cancelled) setUsersLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [adminSection, usersOffset, usersDebouncedFilter]);
 
   /** Recherche utilisateurs (sans demande préalable). */
   useEffect(() => {
@@ -311,7 +365,7 @@ export default function AdminTopUpsPage({ onBack }) {
 
   return (
     <div className="mx-auto w-full min-w-0 max-w-4xl space-y-10 overflow-x-clip pb-24">
-      <div className="flex w-full min-w-0 flex-col gap-5 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+      <div className="flex w-full min-w-0 flex-col gap-5">
         <div className="min-w-0 w-full sm:min-w-[12rem] sm:max-w-[min(100%,28rem)] sm:w-auto">
           {typeof onBack === "function" ? (
             <button
@@ -323,39 +377,218 @@ export default function AdminTopUpsPage({ onBack }) {
             </button>
           ) : null}
           <h1 className="max-w-full break-words font-display text-2xl font-bold tracking-tight text-slate-900 [overflow-wrap:anywhere] dark:text-white md:text-[1.65rem]">
-            Validation des recharges
+            {adminSection === "users" ? "Comptes utilisateurs" : "Validation des recharges"}
           </h1>
           <p className="mt-2 max-w-full text-[13px] leading-relaxed text-slate-600 [overflow-wrap:anywhere] break-words dark:text-slate-400">
-            Le portefeuille utilisateur est en <strong>MRU</strong>. Après virement, soit tu saisis le{" "}
-            <strong>côt USD (fournisseur / API)</strong> prévu pour la recharge : la plateforme créditera automatiquement
-            les MRU équivalents (+ marge comme pour une consommation), soit tu passes en mode saisie directe des{" "}
-            <strong>MRU</strong>.
+            {adminSection === "users" ? (
+              <>
+                Liste paginée de tous les comptes inscrits. Filtre optionnel par e-mail (≥ 2 caractères). Pour ajuster un
+                solde, ouvre la fiche puis passe par <strong className="text-slate-800 dark:text-slate-200">Recharges → Crédit sans demande</strong>.
+              </>
+            ) : (
+              <>
+                Le portefeuille utilisateur est en <strong>MRU</strong>. Après virement, soit tu saisis le{" "}
+                <strong>côt USD (fournisseur / API)</strong> prévu pour la recharge : la plateforme créditera automatiquement
+                les MRU équivalents (+ marge comme pour une consommation), soit tu passes en mode saisie directe des{" "}
+                <strong>MRU</strong>.
+              </>
+            )}
           </p>
         </div>
-        <div
-          role="tablist"
-          aria-label="Filtrer par statut"
-          className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end"
-        >
-          {["pending", "all", "approved", "rejected"].map((s) => (
-            <button
-              key={s}
-              type="button"
-              role="tab"
-              aria-selected={filter === s}
-              onClick={() => setFilter(s)}
-              className={`min-w-0 rounded-full px-2.5 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.08em] transition sm:min-w-0 sm:px-4 sm:text-[11px] sm:tracking-[0.12em] ${
-                filter === s
-                  ? "bg-brand-600 text-white shadow-md ring-2 ring-brand-500/30 ring-offset-0 ring-offset-slate-50 dark:bg-brand-500 dark:ring-offset-slate-950 sm:ring-offset-2"
-                  : "border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 dark:border-slate-600 dark:bg-slate-900/90 dark:text-slate-200 dark:hover:border-slate-500"
-              }`}
+        <div className="flex w-full min-w-0 flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div
+            role="tablist"
+            aria-label="Vue administrateur"
+            className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-none sm:flex-wrap"
+          >
+            {[
+              ["topups", "Recharges"],
+              ["users", "Utilisateurs"],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={adminSection === key}
+                onClick={() => setAdminSection(key)}
+                className={`min-w-0 rounded-full px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.08em] transition sm:text-[11px] sm:tracking-[0.12em] ${
+                  adminSection === key
+                    ? "bg-emerald-600 text-white shadow-md ring-2 ring-emerald-500/30 ring-offset-0 ring-offset-slate-50 dark:bg-emerald-500 dark:ring-offset-slate-950 sm:px-5 sm:ring-offset-2"
+                    : "border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 dark:border-slate-600 dark:bg-slate-900/90 dark:text-slate-200 dark:hover:border-slate-500"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {adminSection === "topups" ? (
+            <div
+              role="tablist"
+              aria-label="Filtrer par statut"
+              className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end"
             >
-              {s === "all" ? "Toutes" : STATUS_FR[s] || s}
-            </button>
-          ))}
+              {["pending", "all", "approved", "rejected"].map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  role="tab"
+                  aria-selected={filter === s}
+                  onClick={() => setFilter(s)}
+                  className={`min-w-0 rounded-full px-2.5 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.08em] transition sm:min-w-0 sm:px-4 sm:text-[11px] sm:tracking-[0.12em] ${
+                    filter === s
+                      ? "bg-brand-600 text-white shadow-md ring-2 ring-brand-500/30 ring-offset-0 ring-offset-slate-50 dark:bg-brand-500 dark:ring-offset-slate-950 sm:ring-offset-2"
+                      : "border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 dark:border-slate-600 dark:bg-slate-900/90 dark:text-slate-200 dark:hover:border-slate-500"
+                  }`}
+                >
+                  {s === "all" ? "Toutes" : STATUS_FR[s] || s}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
 
+      {adminSection === "users" ? (
+        <section
+          aria-labelledby="all-users-heading"
+          className="min-w-0 overflow-x-clip rounded-3xl border border-slate-200/90 bg-white/95 p-4 shadow-soft-lg dark:border-slate-700/90 dark:bg-slate-900/95 sm:p-6"
+        >
+          <h2 id="all-users-heading" className="font-display text-lg font-bold text-slate-900 dark:text-white">
+            Tous les utilisateurs
+          </h2>
+          <div className="mt-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+            <div className="min-w-0 sm:max-w-md sm:flex-1">
+              <label htmlFor="admin-users-filter" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Filtrer par e-mail
+              </label>
+              <input
+                id="admin-users-filter"
+                type="search"
+                autoComplete="off"
+                placeholder="ex. @gmail — laisser vide pour tout afficher"
+                value={usersFilterInput}
+                onChange={(e) => setUsersFilterInput(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+              />
+              {usersFilterInput.trim().length > 0 && usersFilterInput.trim().length < 2 ? (
+                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Au moins 2 caractères pour filtrer.</p>
+              ) : null}
+            </div>
+            <p className="text-[12px] tabular-nums text-slate-600 dark:text-slate-400">
+              {usersTotal} compte{usersTotal !== 1 ? "s" : ""}
+              {usersDebouncedFilter.length >= 2 ? " (filtrés)" : ""}
+            </p>
+          </div>
+
+          {usersLoading ? (
+            <div className="flex justify-center py-16">
+              <div className="flex flex-col items-center gap-3">
+                <div className="size-10 animate-spin rounded-full border-[3px] border-slate-200 border-t-brand-600 dark:border-slate-700 dark:border-t-brand-400" />
+                <p className="text-sm text-slate-500 dark:text-slate-400">Chargement…</p>
+              </div>
+            </div>
+          ) : usersRows.length === 0 ? (
+            <p className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 py-12 text-center text-sm text-slate-600 dark:border-slate-600 dark:bg-slate-950/50 dark:text-slate-400">
+              Aucun compte pour cette page ou ce filtre.
+            </p>
+          ) : (
+            <div className="mt-6 max-w-full overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700">
+              <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50/90 dark:border-slate-700 dark:bg-slate-950/80">
+                    <th className="px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      E-mail
+                    </th>
+                    <th className="px-3 py-3 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Solde (~MRU)
+                    </th>
+                    <th className="hidden px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 md:table-cell dark:text-slate-400">
+                      Inscription
+                    </th>
+                    <th className="px-3 py-3 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usersRows.map((u) => (
+                    <tr
+                      key={u.id}
+                      className="border-b border-slate-100 odd:bg-white even:bg-slate-50/50 last:border-b-0 dark:border-slate-800 dark:odd:bg-slate-900/40 dark:even:bg-slate-900/65"
+                    >
+                      <td className="max-w-[14rem] px-3 py-2.5 align-top md:max-w-none">
+                        <span className="break-all font-medium text-slate-900 dark:text-white">{u.email}</span>
+                        {u.is_admin ? (
+                          <span className="mt-1 block w-fit rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-950 dark:bg-amber-950/70 dark:text-amber-100">
+                            Admin
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-slate-700 dark:text-slate-300">
+                        {typeof u.balance_mru_approx === "number" ? `${u.balance_mru_approx} MRU` : "—"}
+                      </td>
+                      <td className="hidden whitespace-nowrap px-3 py-2.5 text-xs text-slate-500 md:table-cell dark:text-slate-400">
+                        <time dateTime={u.created_at || undefined}>
+                          {u.created_at ? new Date(u.created_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "—"}
+                        </time>
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAdminSection("topups");
+                            setManualSelectedUser({
+                              id: u.id,
+                              email: u.email,
+                              is_admin: u.is_admin,
+                              balance_mru_approx: u.balance_mru_approx,
+                              credit_balance: u.credit_balance,
+                            });
+                            setManualEmailInput(u.email);
+                            setManualSearchHits([]);
+                            setManualDraft(defaultDraft());
+                          }}
+                          className="rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-[11px] font-bold text-brand-800 transition hover:bg-brand-100 dark:border-brand-800 dark:bg-brand-950/50 dark:text-brand-200 dark:hover:bg-brand-950/80"
+                        >
+                          Créditer
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!usersLoading && usersTotal > 0 ? (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Lignes {usersOffset + 1}–{usersOffset + usersRows.length} sur {usersTotal}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={usersOffset <= 0}
+                  onClick={() => setUsersOffset((o) => Math.max(0, o - USERS_PAGE_SIZE))}
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                >
+                  Précédent
+                </button>
+                <button
+                  type="button"
+                  disabled={usersOffset + usersRows.length >= usersTotal}
+                  onClick={() => setUsersOffset((o) => o + USERS_PAGE_SIZE)}
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                >
+                  Suivant
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {adminSection === "topups" ? (
       <section
         aria-labelledby="manual-grant-heading"
         className="min-w-0 overflow-x-clip rounded-3xl border border-violet-200/90 bg-gradient-to-br from-violet-50/90 via-white to-white p-4 shadow-soft-lg dark:border-violet-900/50 dark:from-violet-950/30 dark:via-slate-900 dark:to-slate-900 sm:p-6"
@@ -590,7 +823,10 @@ export default function AdminTopUpsPage({ onBack }) {
           </div>
         </div>
       </section>
+      ) : null}
 
+      {adminSection === "topups" ? (
+      <>
       <h2 className="font-display text-base font-bold tracking-tight text-slate-800 dark:text-slate-100">
         Demandes avec preuve de virement
       </h2>
@@ -863,6 +1099,8 @@ export default function AdminTopUpsPage({ onBack }) {
           })}
         </ul>
       )}
+      </>
+      ) : null}
 
       {proofUrl ? (
         <div
