@@ -8,10 +8,11 @@ import shutil
 import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Any, AsyncIterator, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -75,6 +76,57 @@ def reset_transcribe_job_slots_for_tests() -> None:
     global _job_slot_sem, _job_slot_capacity
     _job_slot_sem = None
     _job_slot_capacity = None
+
+
+def _coerce_dt_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+async def bootstrap_resume_transcription_jobs() -> None:
+    """
+    Au démarrage, relance les jobs encore `queued` et récupère les jobs `processing` orphelins.
+
+    Important: Les jobs sont exécutés **dans le process uvicorn** (pas de worker externe).
+    En cas de redémarrage, un job peut rester `processing` indéfiniment sans cette reprise.
+    """
+    stale_min = int(os.getenv("TRANSCRIBE_JOB_STALE_MINUTES", "20") or "20")
+    resume_limit = int(os.getenv("TRANSCRIBE_BOOTSTRAP_RESUME_LIMIT", "20") or "20")
+    stale_min = max(5, min(stale_min, 24 * 60))
+    resume_limit = max(1, min(resume_limit, 200))
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        proc = db.scalars(select(TranscriptionJob).where(TranscriptionJob.status == "processing")).all()
+        for job in proc:
+            upd = _coerce_dt_utc(getattr(job, "updated_at", None))
+            if upd is None or (now - upd) <= timedelta(minutes=stale_min):
+                continue
+            ui = tr._normalize_ui_locale(getattr(job, "ui_locale", None))
+            job.status = "queued"
+            job.phase = "requeued"
+            job.progress_percent = 1
+            job.status_message = tr._ui_text(
+                ui,
+                "Reprise serveur — tâche remise en file d’attente.",
+                "استئناف الخادم — تمت إعادة المهمة إلى قائمة الانتظار.",
+            )[:768]
+        db.commit()
+
+        queued = db.scalars(
+            select(TranscriptionJob)
+            .where(TranscriptionJob.status == "queued")
+            .order_by(TranscriptionJob.created_at.asc())
+            .limit(resume_limit)
+        ).all()
+        for job in queued:
+            asyncio.create_task(execute_transcription_job(job.public_id))
+    finally:
+        db.close()
 
 
 @asynccontextmanager
@@ -305,7 +357,6 @@ async def _execute_transcription_job_after_slot(job_public_id: str) -> None:
 
 @router.post("/transcribe-jobs")
 async def create_transcription_job(
-    background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
     _auth: Annotated[Optional[User], Depends(require_wallet_user)],
     file: UploadFile = File(...),
@@ -381,7 +432,8 @@ async def create_transcription_job(
     db.add(job)
     db.commit()
 
-    background_tasks.add_task(execute_transcription_job, public_id)
+    # Lance l'exécution dans ce process. La reprise au démarrage gère les crash/restart.
+    asyncio.create_task(execute_transcription_job(public_id))
 
     return JSONResponse({"job_id": public_id, "status": job.status}, status_code=202)
 

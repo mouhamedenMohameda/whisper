@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import {
   ENGINE_COURSE,
@@ -112,7 +112,7 @@ function useEstimatedDurations(files) {
   return map;
 }
 
-export default function UploadZone({
+function UploadZone({
   files,
   onFilesChange,
   subject,
@@ -192,13 +192,13 @@ export default function UploadZone({
   const pctOverall = batchProgress?.overallPct ?? 0;
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6 pb-8 safe-pad-b sm:space-y-10 sm:pb-6 lg:pb-6">
+    <div className="mx-auto w-full min-w-0 max-w-6xl space-y-6 pb-8 safe-pad-b sm:space-y-10 sm:pb-6 lg:pb-6">
       {/*
         Mobile : importer d’abord (ordre visual), halo marketing ensuite — évite vide au scroll + zone réglages plus haut à l’écran.
       */}
-      <div className="flex flex-col gap-6 lg:grid lg:grid-cols-12 lg:gap-14 xl:gap-16">
-        <header className="order-2 space-y-3 text-center sm:space-y-4 lg:order-none lg:col-span-5 lg:text-start xl:col-span-4 lg:sticky lg:top-[6.75rem] lg:self-start">
-          <div className="inline-flex rounded-full bg-gradient-to-r from-brand-500/15 via-violet-500/15 to-cyan-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.26em] text-brand-900 shadow-sm shadow-brand-500/10 dark:text-brand-100 dark:shadow-none sm:px-3.5 sm:py-1.5 sm:tracking-[0.28em]">
+      <div className="flex flex-col gap-5 sm:gap-7 lg:grid lg:grid-cols-12 lg:gap-14 xl:gap-16">
+        <header className="order-2 space-y-3 text-center sm:space-y-4 lg:order-none lg:col-span-5 lg:text-start xl:col-span-4 lg:sticky lg:top-28 lg:self-start xl:top-[7.5rem]">
+          <div className="inline-flex rounded-full bg-gradient-to-r from-brand-500/15 via-amber-500/12 to-rose-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.26em] text-brand-900 shadow-sm shadow-brand-500/10 dark:text-brand-100 dark:shadow-none sm:px-3.5 sm:py-1.5 sm:tracking-[0.28em]">
             {ENGINE_TRANSCRIPTION} × {ENGINE_COURSE}
           </div>
           <h1 className="font-display text-[clamp(1.45rem,5.5vw+0.65rem,2.875rem)] font-extrabold leading-[1.12] tracking-tight text-slate-900 dark:text-white sm:text-fluid-hero sm:leading-[1.1]">
@@ -215,7 +215,7 @@ export default function UploadZone({
               }}
             />
           </p>
-          <ul className="mx-auto mt-4 flex snap-x snap-mandatory gap-2.5 overflow-x-auto pb-1 text-start text-[12.5px] text-slate-600 dark:text-slate-400 [-ms-overflow-style:none] [scrollbar-width:none] sm:mt-5 sm:grid sm:snap-none sm:grid-cols-1 sm:gap-2.5 sm:overflow-visible lg:mx-0 lg:mt-6 xl:gap-4 [&::-webkit-scrollbar]:hidden">
+          <ul className="scroll-x-contained mx-auto mt-4 flex snap-x snap-mandatory gap-2.5 overflow-x-auto scroll-pl-4 pb-1 ps-1 pe-1 text-start text-[12.5px] text-slate-600 dark:text-slate-400 sm:mt-5 sm:grid sm:snap-none sm:grid-cols-1 sm:gap-2.5 sm:overflow-visible sm:scroll-pl-0 sm:ps-0 sm:pe-0 lg:mx-0 lg:mt-6 xl:gap-4">
             <li className="flex min-w-[min(100%,18.5rem)] shrink-0 snap-start gap-2.5 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/90 px-3 py-2.5 shadow-sm dark:border-slate-700/80 dark:from-slate-900/90 dark:to-slate-950/80 sm:min-w-0 sm:gap-3 sm:from-white/40 sm:to-transparent sm:dark:from-slate-900/40">
               <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg bg-brand-500/15 text-[11px]" aria-hidden>1</span>
               <span>
@@ -232,8 +232,8 @@ export default function UploadZone({
                 />
               </span>
             </li>
-            <li className="flex min-w-[min(100%,18.5rem)] shrink-0 snap-start gap-2.5 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white to-violet-50/50 px-3 py-2.5 shadow-sm dark:border-slate-700/80 dark:from-slate-900/90 dark:to-violet-950/25 sm:min-w-0 sm:gap-3 sm:from-white/40 sm:to-transparent sm:dark:from-slate-900/40">
-              <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-[11px]" aria-hidden>2</span>
+            <li className="flex min-w-[min(100%,18.5rem)] shrink-0 snap-start gap-2.5 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white to-amber-50/45 px-3 py-2.5 shadow-sm dark:border-slate-700/80 dark:from-slate-900/90 dark:to-amber-950/20 sm:min-w-0 sm:gap-3 sm:from-white/40 sm:to-transparent sm:dark:from-slate-900/40">
+              <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg bg-amber-500/18 text-[11px]" aria-hidden>2</span>
               <span>
                 <Trans i18nKey="upload.point2" components={{ corr: <strong /> }} />
               </span>
@@ -254,10 +254,10 @@ export default function UploadZone({
           setDrag(false);
           addFiles(e.dataTransfer.files);
         }}
-        className={`group relative isolate overflow-hidden rounded-2xl border-2 border-dashed px-4 py-9 text-center transition-all duration-300 sm:rounded-[2rem] sm:px-8 sm:py-14 lg:rounded-[2.1rem]
+        className={`group relative isolate min-h-[13.5rem] overflow-hidden rounded-2xl border-2 border-dashed px-4 py-9 text-center transition-all duration-300 sm:min-h-0 sm:rounded-[2rem] sm:px-8 sm:py-14 lg:rounded-[2.1rem]
           ${
             drag
-              ? "scale-[1.01] border-brand-500 bg-gradient-to-br from-brand-500/15 via-brand-400/10 to-violet-500/15 shadow-[0_0_0_3px_rgb(124_58_237/0.2),0_32px_64px_-24px_rgb(79_70_229/0.55)] motion-reduce:scale-100 dark:border-brand-400"
+              ? "scale-[1.01] border-brand-500 bg-gradient-to-br from-brand-500/15 via-brand-400/10 to-amber-500/15 shadow-[0_0_0_3px_rgb(234_88_12/0.22),0_32px_64px_-24px_rgb(194_65_12/0.45)] motion-reduce:scale-100 dark:border-brand-400"
               : "border-slate-300/95 bg-gradient-to-b from-white via-white to-slate-50/90 ring-gradient-brand hover-lift motion-reduce:transform-none motion-reduce:shadow-none dark:border-slate-600 dark:from-slate-900/95 dark:via-slate-900 dark:to-slate-950/90"
           }
         `}
@@ -265,8 +265,8 @@ export default function UploadZone({
         <div
           className={`pointer-events-none absolute inset-[2px] rounded-[calc(1.75rem-2px)] transition-opacity duration-500 sm:rounded-[calc(2rem-2px)] lg:rounded-[calc(2.1rem-2px)] motion-reduce:transition-none ${
             drag
-              ? "bg-gradient-to-br from-brand-500/20 via-transparent to-violet-500/25 opacity-100"
-              : "bg-gradient-to-br from-brand-500/[0.08] via-transparent to-violet-600/[0.09] opacity-0 group-hover:opacity-100 motion-reduce:opacity-70 dark:from-brand-400/15 dark:to-violet-600/18"
+              ? "bg-gradient-to-br from-brand-500/20 via-transparent to-amber-500/22 opacity-100"
+              : "bg-gradient-to-br from-brand-500/[0.08] via-transparent to-amber-600/[0.1] opacity-0 group-hover:opacity-100 motion-reduce:opacity-70 dark:from-brand-400/15 dark:to-amber-600/16"
           }`}
           aria-hidden
         />
@@ -281,7 +281,7 @@ export default function UploadZone({
           onChange={(e) => addFiles(e.target.files)}
         />
         <div className="pointer-events-none relative z-[1] space-y-4">
-          <div className="relative mx-auto flex h-[4.1rem] w-[4.1rem] items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500/20 to-violet-500/25 text-[1.85rem] shadow-inner shadow-brand-500/10 transition-transform duration-500 group-hover:scale-105 motion-reduce:transform-none dark:from-brand-500/25 dark:to-violet-600/35 dark:shadow-brand-900/30 sm:h-[4.75rem] sm:w-[4.75rem] sm:text-[2.05rem]">
+          <div className="relative mx-auto flex h-[4.1rem] w-[4.1rem] items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500/20 to-amber-500/25 text-[1.85rem] shadow-inner shadow-brand-500/10 transition-transform duration-500 group-hover:scale-105 motion-reduce:transform-none dark:from-brand-500/25 dark:to-amber-600/30 dark:shadow-brand-900/30 sm:h-[4.75rem] sm:w-[4.75rem] sm:text-[2.05rem]">
             <span className="drop-shadow-sm" aria-hidden>
               🎙️
             </span>
@@ -293,11 +293,11 @@ export default function UploadZone({
           <p className="text-[13px] leading-snug text-slate-500 dark:text-slate-400 sm:text-sm sm:text-[0.948rem]">
             {t("upload.dropHint", { ext: AUDIO_EXTENSIONS_LABEL, h: MAX_AUDIO_SECONDS / 3600 })}
           </p>
-          <div className="flex flex-wrap justify-center gap-1.5 pt-1 sm:gap-2">
+          <div className="scroll-x-contained mx-auto flex max-w-full flex-nowrap justify-start gap-1.5 overflow-x-auto pt-1 sm:flex-wrap sm:justify-center sm:overflow-visible sm:pt-1 md:gap-2">
             {AUDIO_EXTENSIONS_LABEL.split(", ").map((extLabel) => (
               <span
                 key={extLabel}
-                className="rounded-full border border-slate-200/90 bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-600 shadow-sm dark:border-slate-600 dark:bg-slate-900/90 dark:text-slate-300 sm:bg-white/90 sm:px-3 sm:py-1 sm:text-[11px]"
+                className="shrink-0 rounded-full border border-slate-200/90 bg-white px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-slate-600 shadow-sm dark:border-slate-600 dark:bg-slate-900/90 dark:text-slate-300 sm:bg-white/90 sm:px-3 sm:py-1 sm:text-[11px]"
               >
                 {extLabel}
               </span>
@@ -316,41 +316,43 @@ export default function UploadZone({
             return (
               <li
                 key={key}
-                className="glass-panel flex items-center gap-3 rounded-2xl p-4 shadow-sm"
+                className="glass-panel flex flex-col gap-3 rounded-2xl p-4 shadow-sm sm:flex-row sm:items-center sm:gap-3"
               >
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-500/10 text-xl dark:bg-brand-500/15">
-                  🎵
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{f.name}</div>
-                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span>{formatBytes(f.size)}</span>
-                    <span className="text-slate-400">•</span>
-                    <span>
-                      {t("upload.estDur")} {formatDur(d, dash)}
-                    </span>
+                <div className="flex min-w-0 flex-1 items-start gap-3 sm:items-center">
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-500/10 text-xl dark:bg-brand-500/15">
+                    🎵
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="break-words text-sm font-semibold text-slate-900 dark:text-white sm:truncate">{f.name}</div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      <span>{formatBytes(f.size)}</span>
+                      <span className="text-slate-400">•</span>
+                      <span>
+                        {t("upload.estDur")} {formatDur(d, dash)}
+                      </span>
+                      {disabled && (
+                        <>
+                          <span className="text-slate-400">•</span>
+                          <span className="font-medium text-brand-600 dark:text-brand-400">
+                            {t("upload.sendPct", { n: Math.round(filePct * 100) })}
+                          </span>
+                        </>
+                      )}
+                    </div>
                     {disabled && (
-                      <>
-                        <span className="text-slate-400">•</span>
-                        <span className="font-medium text-brand-600 dark:text-brand-400">
-                          {t("upload.sendPct", { n: Math.round(filePct * 100) })}
-                        </span>
-                      </>
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-brand-600 to-amber-500 transition-[width]"
+                          style={{ width: `${Math.round(filePct * 100)}%` }}
+                        />
+                      </div>
                     )}
                   </div>
-                  {disabled && (
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-brand-600 to-violet-500 transition-[width]"
-                        style={{ width: `${Math.round(filePct * 100)}%` }}
-                      />
-                    </div>
-                  )}
                 </div>
                 <button
                   type="button"
                   disabled={disabled}
-                  className="shrink-0 rounded-xl px-3 py-2 text-[11px] font-semibold text-slate-500 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40 dark:hover:bg-rose-950/40 dark:hover:text-rose-300"
+                  className="min-h-[2.75rem] shrink-0 self-end rounded-xl px-4 py-2.5 text-[11px] font-semibold text-slate-500 transition hover:bg-rose-50 hover:text-rose-600 active:scale-[0.98] disabled:opacity-40 motion-reduce:active:scale-100 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 sm:min-h-0 sm:self-auto sm:px-3 sm:py-2"
                   onClick={() => removeAt(i)}
                 >
                   {t("upload.remove")}
@@ -365,7 +367,7 @@ export default function UploadZone({
         <div className="space-y-1">
           <div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-brand-600 to-violet-500 transition-[width]"
+              className="h-full rounded-full bg-gradient-to-r from-brand-600 to-amber-500 transition-[width]"
               style={{ width: `${Math.round(pctOverall * 100)}%` }}
             />
           </div>
@@ -377,7 +379,7 @@ export default function UploadZone({
 
           <div className="glass-panel relative space-y-4 overflow-hidden rounded-3xl border border-white/65 p-4 pt-5 shadow-soft sm:p-5 sm:pt-5 lg:p-6 dark:border-slate-700/80">
         <div
-          className="pointer-events-none absolute inset-x-6 top-0 h-1 rounded-full bg-gradient-to-r from-brand-500 via-violet-500 to-cyan-500 opacity-[0.92] lg:hidden"
+          className="pointer-events-none absolute inset-x-6 top-0 h-1 rounded-full bg-gradient-to-r from-brand-500 via-amber-400 to-rose-400 opacity-[0.92] lg:hidden"
           aria-hidden
         />
         <fieldset className="space-y-2">
@@ -391,14 +393,14 @@ export default function UploadZone({
               }}
             />
           </p>
-          <div className="flex flex-wrap gap-2" role="group" aria-label={t("upload.langGroupAria")}>
+          <div className="grid grid-cols-1 gap-2 xs:grid-cols-2" role="group" aria-label={t("upload.langGroupAria")}>
             {[
               { id: "fr", label: t("langs.french") },
               { id: "ar", label: t("langs.arabic") },
             ].map((opt) => (
               <label
                 key={opt.id}
-                className={`flex cursor-pointer items-center gap-2 rounded-2xl border px-4 py-2.5 text-xs font-bold transition sm:text-sm ${
+                className={`flex min-h-[2.75rem] cursor-pointer items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-xs font-bold transition sm:min-h-0 sm:justify-start sm:text-sm ${
                   speechLanguage === opt.id
                     ? "border-brand-500 bg-brand-500/10 text-brand-900 shadow-inner dark:border-brand-400 dark:bg-brand-950/45 dark:text-brand-100"
                     : "border-slate-200/90 bg-white/70 text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-950/60 dark:text-slate-200"
@@ -424,14 +426,14 @@ export default function UploadZone({
           <p className="text-[11px] leading-snug text-slate-500 dark:text-slate-400">
             {t("upload.engineHint", { cloud: ENGINE_TRANSCRIBE_CLOUD, desk: ENGINE_TRANSCRIBE_ATELIER })}
           </p>
-          <div className="flex flex-wrap gap-2" role="group" aria-label={t("upload.engineGroupAria")}>
+          <div className="grid grid-cols-1 gap-2 xs:grid-cols-2" role="group" aria-label={t("upload.engineGroupAria")}>
             {[
               { id: "openai", label: ENGINE_TRANSCRIBE_CLOUD },
               { id: "local", label: ENGINE_TRANSCRIBE_ATELIER },
             ].map((opt) => (
               <label
                 key={opt.id}
-                className={`flex cursor-pointer items-center gap-2 rounded-2xl border px-4 py-2.5 text-xs font-bold transition sm:text-sm ${
+                className={`flex min-h-[2.75rem] min-w-0 cursor-pointer items-center justify-center gap-2 rounded-2xl border px-3 py-2.5 text-center text-[11px] font-bold leading-snug transition xs:px-4 sm:min-h-0 sm:justify-start sm:text-left sm:text-sm ${
                   transcriptionEngine === opt.id
                     ? "border-brand-500 bg-brand-500/10 text-brand-900 shadow-inner dark:border-brand-400 dark:bg-brand-950/45 dark:text-brand-100"
                     : "border-slate-200/90 bg-white/70 text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-950/60 dark:text-slate-200"
@@ -449,7 +451,7 @@ export default function UploadZone({
                   }
                   value={opt.id}
                 />
-                {opt.label}
+                <span className="break-words">{opt.label}</span>
               </label>
             ))}
           </div>
@@ -478,7 +480,7 @@ export default function UploadZone({
           type="button"
           disabled={disabled || files.length === 0}
           onClick={onSubmit}
-          className="inline-flex min-h-[3rem] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-brand-600 via-brand-500 to-violet-600 px-6 py-3.5 text-sm font-bold text-white shadow-[0_22px_50px_-26px_rgb(79_70_229/0.65)] shadow-glow transition hover:brightness-[1.06] active:translate-y-[0.5px] disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-400 disabled:text-slate-600 disabled:shadow-none disabled:active:translate-y-0 motion-reduce:hover:brightness-100 dark:disabled:from-slate-700 dark:disabled:to-slate-700 dark:disabled:text-slate-400 sm:min-h-[3.125rem] sm:w-auto sm:min-w-[14rem] sm:px-7"
+          className="inline-flex min-h-[3.25rem] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-brand-600 via-amber-500 to-rose-500 px-6 py-3.5 text-sm font-bold text-white shadow-[0_22px_50px_-26px_rgb(194_65_12/0.55)] shadow-glow transition hover:brightness-[1.06] active:translate-y-[0.5px] disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-400 disabled:text-slate-600 disabled:shadow-none disabled:active:translate-y-0 motion-reduce:hover:brightness-100 dark:disabled:from-slate-700 dark:disabled:to-slate-700 dark:disabled:text-slate-400 sm:min-h-[3.125rem] sm:w-auto sm:min-w-[14rem] sm:px-7"
         >
           {disabled && (
             <span className="inline-block size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
@@ -516,3 +518,5 @@ export default function UploadZone({
     </div>
   );
 }
+
+export default memo(UploadZone);

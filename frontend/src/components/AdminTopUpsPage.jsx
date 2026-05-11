@@ -591,9 +591,9 @@ export default function AdminTopUpsPage({ onBack }) {
       {adminSection === "topups" ? (
       <section
         aria-labelledby="manual-grant-heading"
-        className="min-w-0 overflow-x-clip rounded-3xl border border-violet-200/90 bg-gradient-to-br from-violet-50/90 via-white to-white p-4 shadow-soft-lg dark:border-violet-900/50 dark:from-violet-950/30 dark:via-slate-900 dark:to-slate-900 sm:p-6"
+        className="min-w-0 overflow-x-clip rounded-3xl border border-brand-200/90 bg-gradient-to-br from-brand-50/90 via-white to-amber-50/30 p-4 shadow-soft-lg dark:border-brand-900/50 dark:from-brand-950/25 dark:via-slate-900 dark:to-slate-900 sm:p-6"
       >
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-violet-200/70 pb-4 dark:border-violet-800/50">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-brand-200/70 pb-4 dark:border-brand-800/45">
           <div className="min-w-0">
             <h2 id="manual-grant-heading" className="font-display text-lg font-bold text-slate-900 dark:text-white">
               Crédit sans demande
@@ -806,7 +806,7 @@ export default function AdminTopUpsPage({ onBack }) {
                     type="button"
                     disabled={manualBusy}
                     onClick={() => void grantManualCredit()}
-                    className="w-full rounded-2xl bg-gradient-to-r from-violet-600 to-brand-600 py-3 text-sm font-bold text-white shadow-lg shadow-violet-600/20 transition hover:from-violet-500 hover:to-brand-500 disabled:opacity-45 sm:w-auto sm:min-w-[12rem]"
+                    className="w-full rounded-2xl bg-gradient-to-r from-amber-600 to-brand-600 py-3 text-sm font-bold text-white shadow-lg shadow-brand-600/25 transition hover:from-amber-500 hover:to-brand-500 disabled:opacity-45 sm:w-auto sm:min-w-[12rem]"
                   >
                     {manualBusy ? "Application…" : "Appliquer au portefeuille"}
                   </button>

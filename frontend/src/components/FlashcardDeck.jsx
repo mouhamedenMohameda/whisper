@@ -1,6 +1,16 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { parseFlashcards } from "../utils/lessonParsers";
+
+function hashString(s) {
+  // Deterministic, fast, good enough for stable React keys.
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
 
 function Flashcard({
   flipped,
@@ -45,11 +55,21 @@ function Flashcard({
 
 export default function FlashcardDeck({ lessonMarkdown }) {
   const { t } = useTranslation();
-  const cards = useMemo(() => parseFlashcards(lessonMarkdown), [lessonMarkdown]);
-  const [flip, setFlip] = useState({});
+  const cards = useMemo(() => {
+    const parsed = parseFlashcards(lessonMarkdown);
+    return parsed.map((c) => ({
+      ...c,
+      id: hashString(`${c.q}\u241F${c.a}`),
+    }));
+  }, [lessonMarkdown]);
+  const [flipById, setFlipById] = useState({});
 
-  const toggle = (i) => {
-    setFlip((f) => ({ ...f, [i]: !f[i] }));
+  useEffect(() => {
+    setFlipById({});
+  }, [lessonMarkdown]);
+
+  const toggle = (id) => {
+    setFlipById((f) => ({ ...f, [id]: !f[id] }));
   };
 
   if (cards.length === 0) {
@@ -67,13 +87,13 @@ export default function FlashcardDeck({ lessonMarkdown }) {
       <div className="mx-auto grid max-w-5xl gap-4 sm:grid-cols-2">
         {cards.map((c, i) => (
           <Flashcard
-            key={i}
-            flipped={!!flip[i]}
+            key={c.id}
+            flipped={!!flipById[c.id]}
             question={c.q}
             answer={c.a}
             index={i}
             total={cards.length}
-            onToggle={() => toggle(i)}
+            onToggle={() => toggle(c.id)}
             t={t}
           />
         ))}
@@ -81,7 +101,7 @@ export default function FlashcardDeck({ lessonMarkdown }) {
       <div className="flex justify-center">
         <button
           type="button"
-          onClick={() => setFlip({})}
+          onClick={() => setFlipById({})}
           className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800"
         >
           {t("flashcards.resetPack")}

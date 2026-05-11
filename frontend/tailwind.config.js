@@ -6,6 +6,10 @@ export default {
   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
+      screens: {
+        /** Entre téléphone étroit et sm : grille 2 colonnes, réglages côte à côte. */
+        xs: "400px",
+      },
       fontFamily: {
         sans: [
           "Cairo",
@@ -26,18 +30,24 @@ export default {
         ],
       },
       boxShadow: {
-        soft: "0 4px 24px -4px rgba(15, 23, 42, 0.08), 0 8px 32px -8px rgba(15, 23, 42, 0.12)",
+        soft: "0 4px 24px -4px rgba(120, 53, 15, 0.06), 0 8px 32px -8px rgba(15, 23, 42, 0.1)",
         "soft-lg":
-          "0 12px 40px -12px rgba(15, 23, 42, 0.12), 0 4px 16px -4px rgba(15, 23, 42, 0.08)",
-        glow: "0 0 0 1px rgba(99, 102, 241, 0.15), 0 20px 50px -20px rgba(79, 70, 229, 0.35)",
+          "0 12px 40px -12px rgba(194, 65, 12, 0.08), 0 4px 16px -4px rgba(15, 23, 42, 0.08)",
+        glow: "0 0 0 1px rgba(249, 115, 22, 0.2), 0 20px 50px -18px rgba(234, 88, 12, 0.38)",
       },
       colors: {
         brand: {
-          50: "#eef2ff",
-          400: "#818cf8",
-          500: "#6366f1",
-          600: "#4f46e5",
-          900: "#312e81",
+          50: "#fff7ed",
+          100: "#ffedd5",
+          200: "#fed7aa",
+          300: "#fdba74",
+          400: "#fb923c",
+          500: "#f97316",
+          600: "#ea580c",
+          700: "#c2410c",
+          800: "#9a3412",
+          900: "#7c2d12",
+          950: "#431407",
         },
       },
       keyframes: {

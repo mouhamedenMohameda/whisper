@@ -27,6 +27,16 @@ def _f(name: str, default: float) -> float:
         return default
 
 
+def _nonneg(v: float) -> float:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    if f != f:  # NaN
+        return 0.0
+    return max(0.0, f)
+
+
 def _wallet_micro() -> int:
     """Nombre d’unités entières par 1 MRU affiché (quantification du portefeuille)."""
     raw = os.getenv("MRU_WALLET_MICRO")
@@ -44,8 +54,8 @@ MRU_WALLET_MICRO = _wallet_micro()
 
 # Billable multiplier (marge client sur le coût USD fournisseur)
 # Défauts « bas et logiques » : faible marge au-dessus du coût fournisseur (surchargeable en prod).
-MRU_PER_USD = _f("MRU_PER_USD", 40.0)
-MARGIN_MULTIPLIER = _f("CUSTOMER_MARGIN_MULTIPLIER", 1.28)
+MRU_PER_USD = _nonneg(_f("MRU_PER_USD", 40.0))
+MARGIN_MULTIPLIER = _nonneg(_f("CUSTOMER_MARGIN_MULTIPLIER", 1.28))
 
 OPENAI_WHISPER_USD_PER_MINUTE = _f("OPENAI_WHISPER_USD_PER_MINUTE", 0.006)
 LOCAL_WHISPER_USD_PER_MINUTE = _f("LOCAL_WHISPER_USD_PER_MINUTE", 0.002)
@@ -55,8 +65,17 @@ OPENAI_TRANSCRIBE_CHAT_INPUT_USD_PER_MTOK = _f("OPENAI_TRANSCRIBE_CHAT_INPUT_USD
 OPENAI_TRANSCRIBE_CHAT_OUTPUT_USD_PER_MTOK = _f("OPENAI_TRANSCRIBE_CHAT_OUTPUT_USD_PER_MTOK", 0.60)
 
 # Groq (analyse sujet + résumé sur /transcribe) — ajuste selon le modèle / tarif réel.
-GROQ_INPUT_USD_PER_MTOK = _f("GROQ_INPUT_USD_PER_MTOK", 0.05)
-GROQ_OUTPUT_USD_PER_MTOK = _f("GROQ_OUTPUT_USD_PER_MTOK", 0.08)
+GROQ_INPUT_USD_PER_MTOK = _nonneg(_f("GROQ_INPUT_USD_PER_MTOK", 0.05))
+GROQ_OUTPUT_USD_PER_MTOK = _nonneg(_f("GROQ_OUTPUT_USD_PER_MTOK", 0.08))
+
+# Groq — assistant chat : tarifs fournisseur au million (résumé 8B vs chat principal 20B par défaut).
+GROQ_CHAT_SUMMARY_INPUT_USD_PER_MTOK = _nonneg(_f("GROQ_CHAT_SUMMARY_INPUT_USD_PER_MTOK", 0.05))
+GROQ_CHAT_SUMMARY_OUTPUT_USD_PER_MTOK = _nonneg(_f("GROQ_CHAT_SUMMARY_OUTPUT_USD_PER_MTOK", 0.08))
+GROQ_CHAT_MAIN_INPUT_USD_PER_MTOK = _nonneg(_f("GROQ_CHAT_MAIN_INPUT_USD_PER_MTOK", 0.075))
+GROQ_CHAT_MAIN_OUTPUT_USD_PER_MTOK = _nonneg(_f("GROQ_CHAT_MAIN_OUTPUT_USD_PER_MTOK", 0.30))
+
+# Marge client dédiée au chat (défaut ×2 sur le coût fournisseur USD avant conversion MRU).
+CHAT_CUSTOMER_MARGIN_MULTIPLIER = _nonneg(_f("CHAT_CUSTOMER_MARGIN_MULTIPLIER", 2.0))
 
 ANTHROPIC_INPUT_USD_PER_MTOK = _f("ANTHROPIC_INPUT_USD_PER_MTOK", 3.0)
 ANTHROPIC_OUTPUT_USD_PER_MTOK = _f("ANTHROPIC_OUTPUT_USD_PER_MTOK", 15.0)
@@ -66,7 +85,7 @@ EXPORT_JOB_PROVIDER_USD = _f("EXPORT_JOB_PROVIDER_USD", 0.0005)
 
 
 def usd_provider_to_billed_mru(usd_provider: float) -> float:
-    return max(0.0, float(usd_provider)) * MRU_PER_USD * MARGIN_MULTIPLIER
+    return _nonneg(usd_provider) * MRU_PER_USD * MARGIN_MULTIPLIER
 
 
 def transcribe_aggregate_billed_mru(total_provider_usd: float) -> float:
@@ -104,6 +123,35 @@ def groq_chat_provider_usd(prompt_tokens: int, completion_tokens: int) -> float:
 def groq_billed(input_tokens: int, output_tokens: int) -> tuple[float, float]:
     usd = groq_chat_provider_usd(input_tokens, output_tokens)
     return usd, usd_provider_to_billed_mru(usd)
+
+
+def groq_chat_summary_provider_usd(prompt_tokens: int, completion_tokens: int) -> float:
+    pi = max(0, int(prompt_tokens))
+    co = max(0, int(completion_tokens))
+    return (pi / 1_000_000.0) * GROQ_CHAT_SUMMARY_INPUT_USD_PER_MTOK + (
+        co / 1_000_000.0
+    ) * GROQ_CHAT_SUMMARY_OUTPUT_USD_PER_MTOK
+
+
+def groq_chat_main_provider_usd(prompt_tokens: int, completion_tokens: int) -> float:
+    pi = max(0, int(prompt_tokens))
+    co = max(0, int(completion_tokens))
+    return (pi / 1_000_000.0) * GROQ_CHAT_MAIN_INPUT_USD_PER_MTOK + (co / 1_000_000.0) * GROQ_CHAT_MAIN_OUTPUT_USD_PER_MTOK
+
+
+def chat_assistant_billed_mru(
+    summary_prompt_tokens: int,
+    summary_completion_tokens: int,
+    main_prompt_tokens: int,
+    main_completion_tokens: int,
+) -> tuple[float, float]:
+    """Retourne (usd_fournisseur_total, mru_facturé) pour un tour assistant (résumé optionnel + chat)."""
+    usd_s = groq_chat_summary_provider_usd(summary_prompt_tokens, summary_completion_tokens)
+    usd_m = groq_chat_main_provider_usd(main_prompt_tokens, main_completion_tokens)
+    total_usd = _nonneg(usd_s) + _nonneg(usd_m)
+    mu = _nonneg(CHAT_CUSTOMER_MARGIN_MULTIPLIER)
+    mru = _nonneg(total_usd) * MRU_PER_USD * mu
+    return float(total_usd), float(mru)
 
 
 def _mru_to_wallet_units_exact(billed_mru: float) -> int:

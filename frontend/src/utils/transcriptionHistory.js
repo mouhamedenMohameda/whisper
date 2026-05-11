@@ -77,6 +77,7 @@ function removeLesson(id) {
  * @property {number} durationMinutes
  * @property {HistoryUsage} usage
  * @property {string|null} lesson
+ * @property {string[]} [transcriptionJobPublicIds] identifiants publics des tâches serveur (pour note post-transcription)
  */
 
 export function loadHistory() {

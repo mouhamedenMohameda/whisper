@@ -208,7 +208,7 @@ export default function AuthScreen({ onAuthed }) {
       onClick={() => setTab(id)}
       className={`rounded-full px-4 py-2 text-xs font-bold transition ${
         tab === id
-          ? "bg-gradient-to-r from-brand-600 to-violet-600 text-white shadow-glow"
+          ? "bg-gradient-to-r from-brand-600 to-amber-600 text-white shadow-glow"
           : "text-slate-600 hover:bg-white/70 dark:text-slate-400 dark:hover:bg-slate-800/80"
       }`}
     >
@@ -243,7 +243,7 @@ export default function AuthScreen({ onAuthed }) {
             <button
               type="submit"
               disabled={busy}
-              className="mt-2 w-full rounded-2xl bg-gradient-to-r from-brand-600 via-brand-500 to-violet-600 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-2 w-full rounded-2xl bg-gradient-to-r from-brand-600 via-amber-500 to-rose-500 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {t("auth.submitLogin")}
             </button>
@@ -277,7 +277,7 @@ export default function AuthScreen({ onAuthed }) {
             <button
               type="submit"
               disabled={busy}
-              className="w-full rounded-2xl bg-gradient-to-r from-brand-600 via-brand-500 to-violet-600 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-105 disabled:opacity-50"
+              className="w-full rounded-2xl bg-gradient-to-r from-brand-600 via-amber-500 to-rose-500 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-105 disabled:opacity-50"
             >
               {t("auth.createAccount")}
             </button>
@@ -301,7 +301,7 @@ export default function AuthScreen({ onAuthed }) {
               />
               <PasswordField label={t("auth.newPasswordMin")} autoComplete="new-password" value={rpNew} onChange={(e) => setRpNew(e.target.value)} required minLength={8} />
               <PasswordField label={t("auth.confirmPassword")} autoComplete="new-password" value={rpNew2} onChange={(e) => setRpNew2(e.target.value)} required minLength={8} />
-              <button type="submit" disabled={busy} className="w-full rounded-2xl bg-gradient-to-r from-brand-600 via-brand-500 to-violet-600 py-3.5 text-sm font-bold text-white shadow-glow transition disabled:opacity-50">
+              <button type="submit" disabled={busy} className="w-full rounded-2xl bg-gradient-to-r from-brand-600 via-amber-500 to-rose-500 py-3.5 text-sm font-bold text-white shadow-glow transition disabled:opacity-50">
                 {t("auth.resetSubmit")}
               </button>
             </form>

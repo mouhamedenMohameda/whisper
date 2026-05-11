@@ -46,7 +46,7 @@ export default function InsightPanel({ subject, onSubjectChange, deepSummary, tr
   if (!show) return null;
 
   return (
-    <section className="glass-panel rounded-3xl border border-indigo-200/50 bg-gradient-to-br from-indigo-50/80 via-white to-slate-50/90 p-6 shadow-soft dark:border-indigo-900/35 dark:from-indigo-950/30 dark:via-slate-900 dark:to-slate-900/95">
+    <section className="glass-panel rounded-3xl border border-brand-200/50 bg-gradient-to-br from-brand-50/80 via-white to-amber-50/40 p-6 shadow-soft dark:border-brand-900/35 dark:from-brand-950/25 dark:via-slate-900 dark:to-slate-900/95">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1 space-y-1">
           <h3 className="font-display text-lg font-bold text-slate-900 dark:text-white">
@@ -58,7 +58,7 @@ export default function InsightPanel({ subject, onSubjectChange, deepSummary, tr
         {gp + gc > 0 ? (
           <UsageDetailsToggle compact className="shrink-0">
             <div className="flex flex-col gap-2">
-              <span className="inline-block rounded-full border border-indigo-200/70 bg-white/70 px-2.5 py-1 text-[10px] text-slate-600 dark:border-indigo-800/60 dark:bg-slate-950/60 dark:text-slate-400">
+              <span className="inline-block rounded-full border border-brand-200/70 bg-white/70 px-2.5 py-1 text-[10px] text-slate-600 dark:border-brand-800/60 dark:bg-slate-950/60 dark:text-slate-400">
                 {t("editor.insightTok", { insight: ENGINE_INSIGHT, n: gp + gc })}
               </span>
               {insightOptMru > 0 ? (

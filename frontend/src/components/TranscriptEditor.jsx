@@ -54,7 +54,7 @@ export default function TranscriptEditor({
             🌍 {t("editor.langsOther", { count: foreignN })}
           </span>
         ) : unifiedPrimary && showVioletHero ? (
-          <span className="rounded-full border border-violet-200 px-3 py-1 text-xs dark:border-violet-800 dark:text-violet-200/90">
+          <span className="rounded-full border border-brand-200 px-3 py-1 text-xs dark:border-brand-700 dark:text-brand-200/90">
             {t("editor.unifiedView")}
           </span>
         ) : unifiedPrimary && !showVioletHero ? (
@@ -63,7 +63,7 @@ export default function TranscriptEditor({
           </span>
         ) : null}
         {unifiedPrimary && showVioletHero && highRelN > 0 ? (
-          <span className="rounded-full border border-violet-300/70 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-950 dark:border-violet-700 dark:bg-violet-950/50 dark:text-violet-100">
+          <span className="rounded-full border border-brand-300/70 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-950 dark:border-brand-600 dark:bg-brand-950/50 dark:text-brand-100">
             ✓ {t("editor.clearPassage", { count: highRelN })}
           </span>
         ) : null}
@@ -76,7 +76,7 @@ export default function TranscriptEditor({
               ⏱ {t("editor.minAudio", { n: durationMinutes })}
             </span>
           )}
-          <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs dark:border-violet-800 dark:bg-violet-950/50 dark:text-violet-100">
+          <span className="rounded-full border border-brand-200 bg-brand-50/80 px-3 py-1 text-xs dark:border-brand-800 dark:bg-brand-950/50 dark:text-brand-100">
             🧮 {t("editor.tokEst", { n: liveTok })}
             <span className="opacity-75">{t("editor.tokEstHint")}</span>
           </span>
@@ -107,7 +107,7 @@ export default function TranscriptEditor({
               i18nKey="editor.legendUnified"
               components={{
                 red: <span className="font-semibold text-red-600 dark:text-red-400" />,
-                violet: <span className="font-semibold text-violet-700 dark:text-violet-300" />,
+                accent: <span className="font-semibold text-amber-700 dark:text-amber-300" />,
               }}
             />
           </p>
@@ -125,7 +125,7 @@ export default function TranscriptEditor({
                     }),
                   );
                 }}
-                className="rounded-xl border border-violet-200/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-violet-800 shadow-sm transition hover:bg-white dark:border-violet-900 dark:bg-violet-950/50 dark:text-violet-100 dark:hover:bg-violet-950"
+                className="rounded-xl border border-brand-200/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-brand-800 shadow-sm transition hover:bg-white dark:border-brand-800 dark:bg-brand-950/50 dark:text-brand-100 dark:hover:bg-brand-950"
               >
                 {t("editor.copy")}
               </button>
@@ -177,7 +177,7 @@ export default function TranscriptEditor({
                   }),
                 );
               }}
-              className="rounded-xl border border-violet-200 px-4 py-2 text-xs font-semibold text-violet-800 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-100 dark:hover:bg-violet-950/50"
+              className="rounded-xl border border-brand-200 px-4 py-2 text-xs font-semibold text-brand-800 hover:bg-brand-50 dark:border-brand-700 dark:text-brand-100 dark:hover:bg-brand-950/50"
             >
               {t("editor.restoreUnified")}
             </button>

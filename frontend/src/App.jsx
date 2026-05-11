@@ -5,7 +5,10 @@ import BgTranscribeJobsPanel from "./components/BgTranscribeJobsPanel.jsx";
 import LanguageSwitcher from "./components/LanguageSwitcher.jsx";
 import TranscriptEditor from "./components/TranscriptEditor.jsx";
 import UploadZone from "./components/UploadZone.jsx";
+import RouteErrorBoundary from "./components/RouteErrorBoundary.jsx";
 import WhatsAppSupportButton from "./components/WhatsAppSupportButton.jsx";
+import TranscriptionRatingModal from "./components/TranscriptionRatingModal.jsx";
+import IdeaFeedbackModal from "./components/IdeaFeedbackModal.jsx";
 import InsightPanel from "./components/InsightPanel.jsx";
 import { ENGINE_COURSE, ENGINE_INSIGHT, ENGINE_TRANSCRIPTION } from "./branding.js";
 import {
@@ -24,12 +27,14 @@ import {
 } from "./utils/api.js";
 import { loadBgTranscribeJobIds, forgetBgTranscribeJobId, persistBgTranscribeJobId } from "./utils/bgTranscribeJobsStorage.js";
 import { clearAuthSession, getAuthProfile, getAuthToken, setAuthSession } from "./utils/authStorage.js";
-import { loadHistory, prependEntry, removeEntry, updateEntry } from "./utils/transcriptionHistory.js";
+import { getEntry, loadHistory, prependEntry, removeEntry, updateEntry } from "./utils/transcriptionHistory.js";
 import { mergeTranscriptMixedViews } from "./utils/transcriptMixedView.js";
 import { userFacingTranscriptionJobFailure } from "./utils/transcribeUserMessages.js";
 import i18n from "./i18n/index.js";
+import { ratingPromptSignature, wasRatingPromptHandled } from "./utils/ratingPromptSession.js";
 
 const AdminTopUpsPage = lazy(() => import("./components/AdminTopUpsPage.jsx"));
+const ChatPage = lazy(() => import("./components/ChatPage.jsx"));
 const CreditsPage = lazy(() => import("./components/CreditsPage.jsx"));
 const LessonViewer = lazy(() => import("./components/LessonViewer.jsx"));
 const TranscriptionHistoryPage = lazy(() => import("./components/TranscriptionHistoryPage.jsx"));
@@ -59,7 +64,7 @@ const INITIAL_SESSION_USAGE = {
 
 /** @param {string} ph @param {(key: string, opts?: object) => string} t */
 function phaseBadgeLabels(ph, t) {
-  const keys = ["upload", "transcribing", "editing", "generating", "lesson", "history", "credits"];
+  const keys = ["upload", "transcribing", "editing", "generating", "lesson", "history", "credits", "chat"];
   if (keys.includes(ph)) {
     return { short: t(`phases.${ph}.short`), full: t(`phases.${ph}.full`) };
   }
@@ -94,8 +99,18 @@ function mergeAsrPassagesAnnotated(pieces) {
   return out;
 }
 
+/** @param {unknown} v */
+function normalizeLessonMarkdown(v) {
+  return typeof v === "string" ? v : "";
+}
+
 /** @param {Record<string, unknown>} data Réponse brute API transcription (succès). */
-function historyEntryFromTranscribePayload(data, { filenames, subject, speechLanguage, historyId }) {
+function historyEntryFromTranscribePayload(data, { filenames, subject, speechLanguage, historyId, transcriptionJobPublicIds }) {
+  const jobIds = Array.isArray(transcriptionJobPublicIds)
+    ? transcriptionJobPublicIds.map((x) => String(x || "").trim()).filter(Boolean)
+    : transcriptionJobPublicIds
+      ? [String(transcriptionJobPublicIds).trim()].filter(Boolean)
+      : [];
   const label =
     typeof data.filename === "string" && data.filename.trim()
       ? data.filename.trim()
@@ -157,6 +172,7 @@ function historyEntryFromTranscribePayload(data, { filenames, subject, speechLan
         ? "local"
         : "openai",
     asrPassagesAnnotated,
+    transcriptionJobPublicIds: jobIds,
   };
 }
 
@@ -271,8 +287,8 @@ function AnimatedNumber({ value, className = "", suffix = "" }) {
 
 function StatPill({ label, value, accent = "brand", highlight = false }) {
   const color =
-    accent === "violet"
-      ? "text-violet-600 dark:text-violet-400"
+    accent === "amber"
+      ? "text-amber-600 dark:text-amber-400"
       : accent === "emerald"
         ? "text-emerald-600 dark:text-emerald-400"
         : "text-brand-600 dark:text-brand-400";
@@ -386,18 +402,18 @@ function TranscriptionProgressPanel({ transcriptionName, live }) {
     <div className="mx-auto w-full max-w-xl space-y-6">
       <div className="glass-panel relative overflow-hidden rounded-3xl p-8 text-center shadow-soft">
         <div className="pointer-events-none absolute -top-24 left-1/2 size-72 -translate-x-1/2 rounded-full bg-brand-400/20 blur-3xl motion-safe:animate-blob-drift dark:bg-brand-600/15" />
-        <div className="pointer-events-none absolute -bottom-24 -right-10 size-60 rounded-full bg-violet-400/15 blur-3xl motion-safe:animate-blob-drift-reverse dark:bg-violet-700/15" />
+        <div className="pointer-events-none absolute -bottom-24 -right-10 size-60 rounded-full bg-amber-400/20 blur-3xl motion-safe:animate-blob-drift-reverse dark:bg-amber-600/14" />
 
         <div className="relative mx-auto mb-6 grid max-w-sm grid-cols-3 gap-2">
           <StatPill label={t("transcribe.networkUp")} value={up} accent="brand" />
-          <StatPill label={t("transcribe.serverProc")} value={srv} accent="violet" />
+          <StatPill label={t("transcribe.serverProc")} value={srv} accent="amber" />
           <StatPill label={t("transcribe.global")} value={overall} accent="emerald" highlight />
         </div>
         <div className="relative mx-auto flex size-32 items-center justify-center">
           <div
             className="absolute inset-0 rounded-full transition-[background] duration-500"
             style={{
-              background: `conic-gradient(rgb(99 102 241) ${overall}%, rgba(148,163,184,0.18) ${overall}% 100%)`,
+              background: `conic-gradient(rgb(234 88 12) ${overall}%, rgba(148,163,184,0.18) ${overall}% 100%)`,
             }}
           />
           <div className="absolute inset-[6px] rounded-full bg-white shadow-inner dark:bg-slate-950" />
@@ -527,7 +543,7 @@ function GeneratingSkeleton() {
         <div className="h-4 w-56 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-700" />
         <div className="h-3 max-w-md animate-pulse rounded-lg bg-slate-200 dark:bg-slate-700" />
       </div>
-      <div className="relative overflow-hidden rounded-3xl border border-brand-200/80 bg-gradient-to-br from-brand-50 via-white to-violet-50/60 p-8 text-center shadow-soft dark:border-brand-900/50 dark:from-slate-950 dark:via-slate-900 dark:to-violet-950/30">
+      <div className="relative overflow-hidden rounded-3xl border border-brand-200/80 bg-gradient-to-br from-brand-50 via-white to-amber-50/50 p-8 text-center shadow-soft dark:border-brand-900/50 dark:from-slate-950 dark:via-slate-900 dark:to-amber-950/25">
         <div className="pointer-events-none absolute -right-20 -top-20 h-40 w-40 rounded-full bg-brand-400/20 blur-3xl dark:bg-brand-600/10" />
         <div className="relative text-4xl">✨</div>
         <h2 className="relative font-display text-xl font-bold text-slate-900 dark:text-white">
@@ -538,7 +554,7 @@ function GeneratingSkeleton() {
         </p>
         <div className="mx-auto mt-4 h-2 max-w-xs overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-brand-600 via-fuchsia-500 to-brand-400 transition-[width] duration-500"
+            className="h-full rounded-full bg-gradient-to-r from-brand-600 via-amber-500 to-rose-400 transition-[width] duration-500"
             style={{ width: `${25 + (idx + 1) * 18}%` }}
           />
         </div>
@@ -694,12 +710,38 @@ export default function App() {
   const [batchProgress, setBatchProgress] = useState({ perFile: [], overallPct: 0 });
   const [transcribeLive, setTranscribeLive] = useState(null);
   const [celebrate, setCelebrate] = useState(false);
+  /** Remonte l’ErrorBoundary autour du cours après chaque génération / ouverture session. */
+  const [lessonViewBoundaryKey, setLessonViewBoundaryKey] = useState(0);
   const [sessionUsage, setSessionUsage] = useState(() => ({ ...INITIAL_SESSION_USAGE }));
   const [historyBump, reloadHistoryList] = useReducer((x) => x + 1, 0);
   const [currentHistoryId, setCurrentHistoryId] = useState(null);
 
   const historyItems = useMemo(() => loadHistory(), [historyBump]);
   const badges = useMemo(() => phaseBadgeLabels(phase, t), [phase, t]);
+
+  const [transcriptionRatingOffer, setTranscriptionRatingOffer] = useState(/** @type {{ jobPublicIds: string[]; label: string } | null} */ (null));
+  const [transcriptionRatingModalOpen, setTranscriptionRatingModalOpen] = useState(false);
+  const [ideaFeedbackOpen, setIdeaFeedbackOpen] = useState(false);
+
+  const queueTranscriptionRatingOffer = useCallback((jobPublicIds, label) => {
+    const ids = [...new Set((jobPublicIds || []).map((x) => String(x || "").trim()).filter(Boolean))];
+    if (!ids.length) return;
+    if (wasRatingPromptHandled(ids)) return;
+    setTranscriptionRatingOffer({ jobPublicIds: ids, label: label || "" });
+    setTranscriptionRatingModalOpen(false);
+  }, []);
+
+  const showTranscriptionRatingCTA = useMemo(() => {
+    if (!transcriptionRatingOffer || transcriptionRatingModalOpen) return false;
+    if (wasRatingPromptHandled(transcriptionRatingOffer.jobPublicIds)) return false;
+    if (!currentHistoryId) return false;
+    const entry = getEntry(currentHistoryId);
+    const entryIds = Array.isArray(entry?.transcriptionJobPublicIds) ? entry.transcriptionJobPublicIds : [];
+    if (!entryIds.length) return false;
+    return (
+      ratingPromptSignature(entryIds) === ratingPromptSignature(transcriptionRatingOffer.jobPublicIds)
+    );
+  }, [transcriptionRatingOffer, transcriptionRatingModalOpen, currentHistoryId]);
 
   useEffect(() => {
     document.title = t("meta.title");
@@ -766,11 +808,13 @@ export default function App() {
               filenames: [fn],
               subject: typeof full.subject === "string" ? full.subject : i18n.t("common.general"),
               speechLanguage: full.speech_language === "ar" ? "ar" : "fr",
+              transcriptionJobPublicIds: [jobId],
             }),
           );
           forgetBgTranscribeJobId(jobId);
           reloadHistoryList();
           void reloadCreditHud();
+          queueTranscriptionRatingOffer([jobId], fn);
           window.dispatchEvent(
             new CustomEvent("lecturai-toast", {
               detail: { msg: t("app.toastBgReady", { name: fn }), type: "success" },
@@ -788,7 +832,7 @@ export default function App() {
       cancelled = true;
       clearInterval(iv);
     };
-  }, [authGate.ready, reloadCreditHud, t]);
+  }, [authGate.ready, reloadCreditHud, t, queueTranscriptionRatingOffer]);
 
   const busy = phase === "transcribing" || phase === "generating";
 
@@ -812,6 +856,8 @@ export default function App() {
     setInsightPanelOpen(false);
     setInsightLoading(false);
     setCurrentHistoryId(null);
+    setTranscriptionRatingOffer(null);
+    setTranscriptionRatingModalOpen(false);
   };
 
   const openHistoryEntry = (entry) => {
@@ -825,7 +871,7 @@ export default function App() {
     setWordCount(entry.wordCount || 0);
     setDurationMinutes(entry.durationMinutes ?? 0);
     setPrimaryName(entry.displayTitle || "");
-    setLesson(entry.lesson || "");
+    setLesson(normalizeLessonMarkdown(entry.lesson));
     setTranscriptMixedView(entry.transcriptMixedView ?? null);
     setAsrPassagesAnnotated(Array.isArray(entry.asrPassagesAnnotated) ? entry.asrPassagesAnnotated : []);
     setDeepSummary(entry.deepSummary || "");
@@ -847,9 +893,10 @@ export default function App() {
       groqInsightOptionalBilledMru: Number(u.groqInsightOptionalBilledMru ?? 0),
     });
     setCurrentHistoryId(entry.id);
-    const hasLesson = Boolean(entry.lesson && String(entry.lesson).trim());
+    const hasLesson = Boolean(normalizeLessonMarkdown(entry.lesson).trim());
     setActiveTab(hasLesson ? "lesson" : "transcript");
     setPhase(hasLesson ? "lesson" : "editing");
+    if (hasLesson) setLessonViewBoundaryKey((k) => k + 1);
     window.dispatchEvent(
       new CustomEvent("lecturai-toast", { detail: { msg: t("app.sessionRestored"), type: "info" } }),
     );
@@ -919,11 +966,13 @@ export default function App() {
                 filenames: [fn],
                 subject: typeof full.subject === "string" ? full.subject : t("common.general"),
                 speechLanguage: full.speech_language === "ar" ? "ar" : "fr",
+                transcriptionJobPublicIds: [jobId],
               }),
             );
             forgetBgTranscribeJobId(jobId);
             reloadHistoryList();
             void reloadCreditHud();
+            queueTranscriptionRatingOffer([jobId], fn);
             entry = loadHistory().find((e) => e.id === hid);
           }
           if (entry) openHistoryEntry(entry);
@@ -1010,6 +1059,7 @@ export default function App() {
               subject:
                 typeof terminalRow.subject === "string" ? terminalRow.subject.trim() || t("common.general") : t("common.general"),
               speechLanguage: terminalRow.speech_language === "ar" ? "ar" : "fr",
+              transcriptionJobPublicIds: [jobId],
             }),
           );
           reloadHistoryList();
@@ -1017,6 +1067,7 @@ export default function App() {
           if (settled) openHistoryEntry(settled);
 
           void reloadCreditHud();
+          queueTranscriptionRatingOffer([jobId], label);
           window.dispatchEvent(
             new CustomEvent("lecturai-toast", {
               detail: { msg: t("app.transcriptReady"), type: "success" },
@@ -1094,7 +1145,6 @@ export default function App() {
         asrPassagesAnnotated,
       });
       setWordCount(wc);
-      reloadHistoryList();
     }, 1400);
     return () => clearTimeout(tmr);
   }, [transcript, subject, phase, currentHistoryId, deepSummary, groqInsightApplied, groqTruncatedHint, asrPassagesAnnotated]);
@@ -1133,6 +1183,7 @@ export default function App() {
     };
 
     try {
+      const jobPublicIdsCollected = [];
       setSessionUsage({ ...INITIAL_SESSION_USAGE });
       setTranscriptMixedView(null);
       setAsrPassagesAnnotated([]);
@@ -1250,6 +1301,7 @@ export default function App() {
             throw new Error(t("transcribe.transcribeEmpty"));
           }
           data = /** @type {Record<string, unknown>} */ (rawResult);
+          jobPublicIdsCollected.push(enq.job_id);
         } catch (fileErr) {
           if (
             jobIdCaptured &&
@@ -1308,7 +1360,7 @@ export default function App() {
 
       const transcriptJoined = chunks.join("\n\n---\n\n");
       const mergedMv = mergeTranscriptMixedViews(mixedPieces);
-      /** Texte officiel : vue unifiée (surlignages rouge / violet) si le backend l’a renvoyée, sinon verbatim horodaté. */
+      /** Texte officiel : vue unifiée (surlignages rouge / orange) si le backend l’a renvoyée, sinon verbatim horodaté. */
       const transcriptFinal =
         mergedMv?.blocks?.length > 0 && typeof mergedMv.plain_text === "string" && mergedMv.plain_text.trim()
           ? mergedMv.plain_text
@@ -1376,12 +1428,14 @@ export default function App() {
         groqInsightApplied: groqAppliedFlag,
         groqTranscriptTruncated: groqTruncAny,
         asrPassagesAnnotated: mergedAsr,
+        transcriptionJobPublicIds: jobPublicIdsCollected,
       });
       setCurrentHistoryId(hid);
       reloadHistoryList();
 
       setPhase("editing");
       void reloadCreditHud();
+      queueTranscriptionRatingOffer(jobPublicIdsCollected, files[0]?.name || "");
       window.dispatchEvent(
         new CustomEvent("lecturai-toast", {
           detail: { msg: t("app.transcriptReady"), type: "success" },
@@ -1477,6 +1531,7 @@ export default function App() {
       return;
     }
     setPhase("generating");
+    void import("./components/LessonViewer.jsx").catch(() => {});
     try {
       const result = await generateLesson(
         transcript,
@@ -1494,7 +1549,8 @@ export default function App() {
         ? transcript.trim().split(/\s+/).filter(Boolean).length
         : 0;
 
-      setLesson(result.lesson || "");
+      const lessonStr = normalizeLessonMarkdown(result?.lesson);
+      setLesson(lessonStr);
       setWordCount(wcLesson);
 
       setSessionUsage((prev) => ({
@@ -1510,7 +1566,7 @@ export default function App() {
           subject,
           language,
           wordCount: wcLesson,
-          lesson: result.lesson || "",
+          lesson: lessonStr,
           durationMinutes,
           asrPassagesAnnotated,
           usage: {
@@ -1523,6 +1579,7 @@ export default function App() {
         reloadHistoryList();
       }
 
+      setLessonViewBoundaryKey((k) => k + 1);
       setActiveTab("lesson");
       setPhase("lesson");
       void reloadCreditHud();
@@ -1561,7 +1618,7 @@ export default function App() {
 
   if (authGate.loading) {
     return (
-      <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-gradient-to-b from-slate-50 via-indigo-50/40 to-white dark:from-slate-950 dark:via-indigo-950/20 dark:to-slate-950">
+      <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-gradient-to-b from-orange-50/90 via-amber-50/35 to-white dark:from-slate-950 dark:via-orange-950/15 dark:to-slate-950">
         <div className="pointer-events-none absolute inset-0 bg-dot-grid opacity-50 motion-reduce:hidden dark:opacity-30" aria-hidden />
         <div className="glass-panel relative z-10 flex flex-col items-center gap-4 rounded-3xl px-10 py-12 shadow-soft-lg motion-safe:animate-fade-in-up">
           <div className="size-11 animate-spin rounded-full border-4 border-brand-600/25 border-t-brand-600 dark:border-brand-400/20 dark:border-t-brand-400" />
@@ -1596,11 +1653,11 @@ export default function App() {
 
   if (!authGate.skipped && !authGate.ready) {
     return (
-      <div className="relative flex min-h-[100dvh] min-w-0 flex-col overflow-x-hidden bg-gradient-to-b from-slate-50 via-white to-indigo-50/30 text-slate-900 transition dark:from-slate-950 dark:via-slate-950 dark:to-indigo-950/25 dark:text-slate-50">
+      <div className="relative flex min-h-[100dvh] min-w-0 flex-col overflow-x-hidden bg-gradient-to-b from-orange-50/70 via-white to-amber-50/40 text-slate-900 transition dark:from-slate-950 dark:via-slate-950 dark:to-orange-950/20 dark:text-slate-50">
         <div className="pointer-events-none fixed inset-0 bg-dot-grid opacity-40 dark:opacity-[0.2]" aria-hidden />
         <div className="pointer-events-none fixed inset-0 hidden overflow-hidden lg:block" aria-hidden>
-          <div className="absolute -left-[18%] top-[-12%] h-[min(400px,70vw)] w-[min(400px,95vw)] rounded-full bg-brand-400/26 blur-[100px] motion-safe:animate-blob-drift dark:bg-indigo-600/16" />
-          <div className="absolute bottom-[-18%] right-[-12%] h-[min(380px,65vw)] w-[min(380px,92vw)] rounded-full bg-cyan-400/24 blur-[110px] motion-safe:animate-blob-drift-reverse dark:bg-cyan-600/14" />
+          <div className="absolute -left-[18%] top-[-12%] h-[min(400px,70vw)] w-[min(400px,95vw)] rounded-full bg-brand-400/28 blur-[100px] motion-safe:animate-blob-drift dark:bg-brand-600/14" />
+          <div className="absolute bottom-[-18%] right-[-12%] h-[min(380px,65vw)] w-[min(380px,92vw)] rounded-full bg-rose-300/22 blur-[110px] motion-safe:animate-blob-drift-reverse dark:bg-rose-600/12" />
         </div>
         <ToastPortal />
         <AuthScreen onAuthed={handleAuthed} />
@@ -1611,12 +1668,12 @@ export default function App() {
   if (authGate.ready && !authGate.skipped && profileFlags.is_admin) {
     const adminEmail = getAuthProfile()?.email;
     return (
-      <div className="relative flex min-h-[100dvh] w-full min-w-0 max-w-[100%] flex-col overflow-x-hidden bg-gradient-to-b from-slate-50 via-emerald-50/[0.2] to-cyan-50/25 text-slate-900 transition dark:from-slate-950 dark:via-emerald-950/[0.08] dark:to-slate-950 dark:text-slate-50">
+      <div className="relative flex min-h-[100dvh] w-full min-w-0 max-w-[100%] flex-col overflow-x-hidden bg-gradient-to-b from-orange-50/80 via-white to-amber-50/30 text-slate-900 transition dark:from-slate-950 dark:via-orange-950/[0.12] dark:to-slate-950 dark:text-slate-50">
         <div className="pointer-events-none fixed inset-0 bg-dot-grid opacity-35 dark:opacity-[0.18]" aria-hidden />
         {/* Même logique que l’app principale : pas de blobs animés < lg (Safari mobile + débordements visuels). */}
         <div className="pointer-events-none fixed inset-0 hidden overflow-hidden lg:block" aria-hidden>
-          <div className="absolute -left-[15%] top-[-14%] h-[min(400px,70vw)] w-[min(400px,92vw)] rounded-full bg-emerald-400/24 blur-[100px] motion-safe:animate-blob-drift dark:bg-emerald-600/12" />
-          <div className="absolute bottom-[-14%] right-[-12%] h-[min(400px,60vw)] w-[min(400px,85vw)] rounded-full bg-cyan-400/20 blur-[110px] motion-safe:animate-blob-drift-reverse" />
+          <div className="absolute -left-[15%] top-[-14%] h-[min(400px,70vw)] w-[min(400px,92vw)] rounded-full bg-brand-400/22 blur-[100px] motion-safe:animate-blob-drift dark:bg-brand-600/12" />
+          <div className="absolute bottom-[-14%] right-[-12%] h-[min(400px,60vw)] w-[min(400px,85vw)] rounded-full bg-amber-400/18 blur-[110px] motion-safe:animate-blob-drift-reverse dark:bg-amber-700/10" />
         </div>
 
         <ToastPortal />
@@ -1687,19 +1744,31 @@ export default function App() {
   const profileEmail = getAuthProfile()?.email;
 
   return (
-    <div className="relative flex min-h-[100dvh] min-w-0 flex-col overflow-x-hidden bg-gradient-to-b from-slate-50 via-white to-indigo-50/25 text-slate-900 transition dark:from-slate-950 dark:via-slate-950 dark:to-indigo-950/30 dark:text-slate-50">
+    <div className="relative flex min-h-[100dvh] min-w-0 flex-col overflow-x-hidden bg-gradient-to-b from-orange-50/75 via-white to-rose-50/25 text-slate-900 transition dark:from-slate-950 dark:via-slate-950 dark:to-orange-950/25 dark:text-slate-50">
       <div className="pointer-events-none fixed inset-0 bg-dot-grid opacity-[0.45] dark:opacity-[0.22]" aria-hidden />
       {/* Blobs animés : masqués < lg pour alléger le GPU mobile (zones du bas qui “arrivent” en retard). */}
       <div className="pointer-events-none fixed inset-0 hidden overflow-hidden lg:block" aria-hidden>
-        <div className="absolute -left-[20%] top-[-14%] h-[min(460px,60vw)] w-[min(460px,85vw)] rounded-full bg-brand-400/28 blur-[100px] motion-safe:animate-blob-drift dark:bg-indigo-600/18" />
-        <div className="absolute bottom-[-18%] right-[-14%] h-[min(440px,55vw)] w-[min(440px,82vw)] rounded-full bg-cyan-400/22 blur-[110px] motion-safe:animate-blob-drift-reverse dark:bg-cyan-600/14" />
-        <div className="absolute left-1/2 top-[38%] h-72 w-72 -translate-x-1/2 rounded-full bg-violet-400/18 blur-[100px] motion-safe:animate-breathe dark:bg-violet-600/10" />
+        <div className="absolute -left-[20%] top-[-14%] h-[min(460px,60vw)] w-[min(460px,85vw)] rounded-full bg-brand-400/30 blur-[100px] motion-safe:animate-blob-drift dark:bg-brand-600/16" />
+        <div className="absolute bottom-[-18%] right-[-14%] h-[min(440px,55vw)] w-[min(440px,82vw)] rounded-full bg-amber-300/25 blur-[110px] motion-safe:animate-blob-drift-reverse dark:bg-amber-600/12" />
+        <div className="absolute left-1/2 top-[38%] h-72 w-72 -translate-x-1/2 rounded-full bg-rose-300/20 blur-[100px] motion-safe:animate-breathe dark:bg-rose-600/10" />
       </div>
 
       <ToastPortal />
-      <header className="sticky top-0 z-50 px-3 pt-3 pb-1 sm:px-4 lg:px-8">
-        <div className="glass-header mx-auto min-w-0 max-w-full rounded-2xl px-4 py-3 sm:max-w-6xl sm:rounded-3xl sm:px-6 sm:py-3.5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between lg:items-center">
+      <TranscriptionRatingModal
+        open={transcriptionRatingModalOpen}
+        jobPublicIds={transcriptionRatingOffer?.jobPublicIds ?? []}
+        fileLabel={transcriptionRatingOffer?.label}
+        onClose={() => {
+          setTranscriptionRatingModalOpen(false);
+          setTranscriptionRatingOffer((prev) =>
+            prev && wasRatingPromptHandled(prev.jobPublicIds) ? null : prev,
+          );
+        }}
+      />
+      <IdeaFeedbackModal open={ideaFeedbackOpen} uiLocale={i18n.language} onClose={() => setIdeaFeedbackOpen(false)} />
+      <header className="sticky top-0 z-50 px-2 pt-[max(0.5rem,env(safe-area-inset-top,0px))] pb-1 sm:px-4 lg:px-8">
+        <div className="glass-header mx-auto min-w-0 max-w-full rounded-2xl border border-brand-200/20 px-3 py-2.5 shadow-sm shadow-brand-900/[0.03] sm:max-w-6xl sm:rounded-3xl sm:px-6 sm:py-3.5 dark:border-white/5 dark:shadow-black/20">
+          <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-3 lg:items-center">
             <div className="flex min-w-0 flex-1 items-start gap-3">
               <div className="min-w-0">
                 <span className="flex flex-wrap items-baseline gap-2 font-display">
@@ -1722,8 +1791,8 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex w-full min-w-0 flex-wrap items-center gap-2 justify-start sm:w-auto sm:justify-end">
-              <span className="hidden items-center rounded-full border border-transparent bg-slate-900/[0.04] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:bg-white/[0.04] dark:text-slate-400 sm:inline-flex">
+            <div className="scroll-x-contained -mx-1 flex w-full min-w-0 flex-nowrap items-center gap-2 overflow-x-auto px-1 pb-0.5 sm:mx-0 sm:w-auto sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
+              <span className="hidden shrink-0 items-center rounded-full border border-transparent bg-slate-900/[0.04] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:bg-white/[0.04] dark:text-slate-400 sm:inline-flex">
                 {badges.full}
               </span>
               {!authGate.skipped ? (
@@ -1734,10 +1803,10 @@ export default function App() {
                     creditHud?.blocked && !creditHud.canUse ? creditHud.blocked : t("app.walletTitle")
                   }
                   onClick={() => setPhase("credits")}
-                  className={`rounded-full border px-3 py-2 text-[11px] font-bold shadow-sm backdrop-blur-sm transition hover:brightness-[1.02] disabled:cursor-not-allowed disabled:opacity-45 tabular-nums sm:px-4 ${
+                  className={`shrink-0 rounded-full border px-3 py-2.5 text-[11px] font-bold shadow-sm backdrop-blur-sm transition hover:brightness-[1.02] disabled:cursor-not-allowed disabled:opacity-45 tabular-nums sm:min-h-0 sm:px-4 sm:py-2 ${
                     creditHud && !creditHud.canUse
                       ? "border-amber-300/70 bg-gradient-to-br from-amber-100 to-amber-50/70 text-amber-950 shadow-amber-200/30 dark:border-amber-900/60 dark:from-amber-950/60 dark:to-amber-950/30 dark:text-amber-100"
-                      : "border-violet-300/55 bg-gradient-to-br from-white to-violet-50/80 text-violet-900 shadow-violet-400/15 dark:border-violet-900/65 dark:from-violet-950/50 dark:to-slate-900/85 dark:text-violet-100"
+                      : "border-brand-300/50 bg-gradient-to-br from-white to-brand-50/90 text-brand-900 shadow-brand-500/10 dark:border-brand-800/50 dark:from-brand-950/40 dark:to-slate-900/90 dark:text-brand-100"
                   }`}
                 >
                   <span className="opacity-85">MRU</span>
@@ -1751,11 +1820,27 @@ export default function App() {
                   reloadHistoryList();
                   setPhase("history");
                 }}
-                className="rounded-full border border-slate-200/90 bg-white/75 px-3 py-2 text-[11px] font-bold text-slate-800 shadow-sm backdrop-blur-md transition hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-600 dark:bg-slate-900/80 dark:text-slate-100 dark:hover:bg-slate-800 sm:px-4"
+                className="shrink-0 rounded-full border border-slate-200/90 bg-white/75 px-3 py-2.5 text-[11px] font-bold text-slate-800 shadow-sm backdrop-blur-md transition hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-600 dark:bg-slate-900/80 dark:text-slate-100 dark:hover:bg-slate-800 sm:py-2 sm:px-4"
               >
                 {t("app.historyBtn")}
               </button>
-              <LanguageSwitcher className="rounded-full border border-slate-200/90 bg-white/75 px-2 py-1.5 text-[11px] font-bold text-slate-800 shadow-sm backdrop-blur-md dark:border-slate-600 dark:bg-slate-900/80 dark:text-slate-100" />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setPhase("chat")}
+                className="shrink-0 rounded-full border border-slate-200/90 bg-white/75 px-3 py-2.5 text-[11px] font-bold text-slate-800 shadow-sm backdrop-blur-md transition hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-600 dark:bg-slate-900/80 dark:text-slate-100 dark:hover:bg-slate-800 sm:py-2 sm:px-4"
+              >
+                {t("app.chatBtn")}
+              </button>
+              <LanguageSwitcher className="rounded-full border border-slate-200/90 bg-white/75 px-1.5 py-0.5 text-[11px] font-bold text-slate-800 shadow-sm backdrop-blur-md dark:border-slate-600 dark:bg-slate-900/80 dark:text-slate-100 sm:px-2 sm:py-1.5" />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setIdeaFeedbackOpen(true)}
+                className="shrink-0 rounded-full border border-emerald-200/80 bg-emerald-50/90 px-3 py-2.5 text-[11px] font-bold text-emerald-900 shadow-sm backdrop-blur-md transition hover:bg-emerald-100/90 disabled:cursor-not-allowed disabled:opacity-45 dark:border-emerald-900/55 dark:bg-emerald-950/50 dark:text-emerald-100 dark:hover:bg-emerald-950/80 sm:py-2 sm:px-4"
+              >
+                {t("feedback.ideasBtn")}
+              </button>
               <WhatsAppSupportButton variant="header" />
               {authGate.skipped !== true && profileEmail ? (
                 <span
@@ -1773,7 +1858,7 @@ export default function App() {
                     setPhase("upload");
                     setAuthGate({ loading: false, skipped: false, ready: false, loadError: false });
                   }}
-                  className="rounded-full border border-rose-300/60 bg-white/85 px-3 py-2 text-[11px] font-bold text-rose-800 shadow-sm transition hover:bg-rose-50 dark:border-rose-900/55 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/70 sm:px-4"
+                  className="shrink-0 rounded-full border border-rose-300/60 bg-white/85 px-3 py-2.5 text-[11px] font-bold text-rose-800 shadow-sm transition hover:bg-rose-50 dark:border-rose-900/55 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/70 sm:py-2 sm:px-4"
                 >
                   {t("app.logout")}
                 </button>
@@ -1781,7 +1866,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setDark((d) => !d)}
-                className="inline-flex items-center rounded-full border border-slate-200/90 bg-slate-900/[0.03] px-3 py-2 text-[11px] font-semibold text-slate-700 transition hover:bg-white dark:border-slate-600 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-slate-800"
+                className="inline-flex min-h-[2.75rem] shrink-0 items-center rounded-full border border-slate-200/90 bg-slate-900/[0.03] px-3 py-2 text-[11px] font-semibold text-slate-700 transition hover:bg-white dark:border-slate-600 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-slate-800 sm:min-h-0 sm:py-2"
                 aria-label={t("common.toggleTheme")}
               >
                 <span aria-hidden>{dark ? "☀️" : "🌙"}</span>
@@ -1792,7 +1877,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto w-full min-w-0 flex-1 max-w-6xl safe-pad-x px-4 py-8 pb-14 sm:px-6 lg:px-10 lg:py-12 xl:pb-20">
+      <main className="relative z-10 mx-auto w-full min-w-0 max-w-6xl flex-1 safe-pad-x py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-12 pb-[max(3.25rem,env(safe-area-inset-bottom,0px)+1.75rem)] sm:pb-14 xl:pb-20">
         {phase === "history" && (
           <Suspense fallback={<RouteLazyFallback />}>
             <TranscriptionHistoryPage
@@ -1807,6 +1892,12 @@ export default function App() {
         {phase === "credits" && (
           <Suspense fallback={<RouteLazyFallback />}>
             <CreditsPage onBack={() => setPhase("upload")} onWalletUpdated={reloadCreditHud} />
+          </Suspense>
+        )}
+
+        {phase === "chat" && (
+          <Suspense fallback={<RouteLazyFallback />}>
+            <ChatPage onBack={() => setPhase("upload")} onWalletUpdated={reloadCreditHud} />
           </Suspense>
         )}
 
@@ -1921,7 +2012,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => setInsightPanelOpen(true)}
-                        className="rounded-xl border border-indigo-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-800 transition hover:bg-indigo-50 dark:border-indigo-800 dark:bg-slate-900 dark:text-indigo-200 dark:hover:bg-slate-800"
+                        className="rounded-xl border border-brand-200 bg-white px-4 py-2 text-xs font-semibold text-brand-800 transition hover:bg-brand-50 dark:border-brand-800 dark:bg-slate-900 dark:text-brand-200 dark:hover:bg-slate-800"
                       >
                         {t("app.insightShowBtn")}
                       </button>
@@ -1930,7 +2021,7 @@ export default function App() {
                         type="button"
                         disabled={insightLoading || busy}
                         onClick={() => void runOptionalTranscriptInsight()}
-                        className="rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-xl bg-gradient-to-r from-brand-600 to-amber-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {insightLoading ? t("app.insightLoading") : t("app.insightRunBtn")}
                       </button>
@@ -1963,11 +2054,23 @@ export default function App() {
               mixedView={transcriptMixedView}
             />
 
+            {showTranscriptionRatingCTA ? (
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setTranscriptionRatingModalOpen(true)}
+                  className="rounded-2xl border border-amber-200/90 bg-amber-50/90 px-5 py-2.5 text-sm font-semibold text-amber-950 shadow-sm transition hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/60"
+                >
+                  {t("feedback.ratingOpenBtn")}
+                </button>
+              </div>
+            ) : null}
+
             <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-500">
               {t("app.mruFootnote")}
             </p>
 
-            <div className="glass-panel rounded-3xl border border-brand-200/60 bg-gradient-to-br from-brand-50/90 via-white to-violet-50/50 p-8 text-center shadow-soft dark:border-brand-900/40 dark:from-slate-900/80 dark:via-slate-900 dark:to-violet-950/20">
+            <div className="glass-panel rounded-3xl border border-brand-200/60 bg-gradient-to-br from-brand-50/90 via-white to-amber-50/45 p-8 text-center shadow-soft dark:border-brand-900/40 dark:from-slate-900/80 dark:via-slate-900 dark:to-brand-950/15">
               <h3 className="font-display text-xl font-bold text-slate-900 dark:text-white">
                 {t("app.structuredTitle")}
               </h3>
@@ -1978,7 +2081,7 @@ export default function App() {
                 type="button"
                 onClick={startGeneration}
                 disabled={busy}
-                className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-brand-600 via-brand-500 to-violet-600 px-8 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none dark:disabled:opacity-40"
+                className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-brand-600 via-amber-500 to-rose-500 px-8 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none dark:disabled:opacity-40"
               >
                 {t("app.genCourse")}
               </button>
@@ -1989,22 +2092,59 @@ export default function App() {
         {phase === "generating" && <GeneratingSkeleton />}
 
         {phase === "lesson" && (
-          <Suspense fallback={<RouteLazyFallback />}>
-            <LessonViewer
-              activeTab={activeTab}
-              onTabChange={setActiveTab}
-              transcript={transcript}
-              transcriptMixedView={transcriptMixedView}
-              lesson={lesson}
-              subject={subject || "General"}
-              filename={exportBaseName}
-              language={language}
-              speechChosenLabel={speechLanguage === "ar" ? t("langs.arabic") : t("langs.french")}
-              wordCount={wordCount}
-              durationMinutes={durationMinutes}
-              celebration={celebrate}
-              usage={sessionUsage}
-            />
+          <>
+            <RouteErrorBoundary
+              key={lessonViewBoundaryKey}
+              fallback={() => (
+                <div className="glass-panel mx-auto max-w-3xl space-y-4 rounded-3xl border border-rose-200/80 bg-rose-50/50 p-8 text-center shadow-soft dark:border-rose-900/50 dark:bg-rose-950/25">
+                  <h2 className="font-display text-xl font-bold text-rose-950 dark:text-rose-100">
+                    {t("lesson.renderErrorTitle")}
+                  </h2>
+                  <p className="text-sm leading-relaxed text-rose-900/90 dark:text-rose-200/90">
+                    {t("lesson.renderErrorBody")}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLesson("");
+                      setPhase("editing");
+                    }}
+                    className="rounded-2xl bg-brand-600 px-6 py-3 text-sm font-semibold text-white shadow-glow transition hover:brightness-105"
+                  >
+                    {t("app.backTranscript")}
+                  </button>
+                </div>
+              )}
+            >
+              <Suspense fallback={<RouteLazyFallback />}>
+                <LessonViewer
+                  activeTab={activeTab}
+                  onTabChange={setActiveTab}
+                  transcript={transcript}
+                  transcriptMixedView={transcriptMixedView}
+                  lesson={lesson}
+                  subject={subject || "General"}
+                  filename={exportBaseName}
+                  language={language}
+                  speechChosenLabel={speechLanguage === "ar" ? t("langs.arabic") : t("langs.french")}
+                  wordCount={wordCount}
+                  durationMinutes={durationMinutes}
+                  celebration={celebrate}
+                  usage={sessionUsage}
+                />
+              </Suspense>
+            </RouteErrorBoundary>
+            {showTranscriptionRatingCTA ? (
+              <div className="mx-auto mt-6 flex max-w-3xl justify-center">
+                <button
+                  type="button"
+                  onClick={() => setTranscriptionRatingModalOpen(true)}
+                  className="rounded-2xl border border-amber-200/90 bg-amber-50/90 px-5 py-2.5 text-sm font-semibold text-amber-950 shadow-sm transition hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/60"
+                >
+                  {t("feedback.ratingOpenBtn")}
+                </button>
+              </div>
+            ) : null}
             <div className="mx-auto mt-10 flex max-w-3xl flex-wrap justify-between gap-3">
               <button
                 type="button"
@@ -2040,11 +2180,11 @@ export default function App() {
                 {t("app.newSession")}
               </button>
             </div>
-          </Suspense>
+          </>
         )}
       </main>
 
-      <footer className="relative z-10 mx-4 mb-6 mt-auto rounded-3xl border border-white/50 bg-white/45 px-4 py-6 text-center text-xs leading-relaxed text-slate-500 shadow-sm backdrop-blur-md dark:border-slate-700/70 dark:bg-slate-950/55 dark:text-slate-400 sm:mx-auto sm:max-w-6xl sm:px-6 safe-pad-b">
+      <footer className="relative z-10 mx-4 mb-6 mt-auto rounded-3xl border border-brand-200/30 bg-gradient-to-br from-white/80 to-orange-50/40 px-4 py-6 text-center text-xs leading-relaxed text-slate-600 shadow-sm backdrop-blur-md dark:border-brand-900/30 dark:from-slate-950/80 dark:to-brand-950/20 dark:text-slate-400 sm:mx-auto sm:max-w-6xl sm:px-6 safe-pad-b">
         {t("app.footer")}
       </footer>
     </div>

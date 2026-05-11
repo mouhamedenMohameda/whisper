@@ -8,10 +8,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import Base, engine
 from deps import auth_required
-from models import CreditTopUpRequest, TranscriptionJob, User  # noqa: F401 — charge models + tables
+from models import (  # noqa: F401 — charge models + tables
+    AppUserFeedback,
+    ChatMessage,
+    ChatThread,
+    CreditTopUpRequest,
+    TranscriptionJob,
+    TranscriptionJobRating,
+    User,
+)
 from admin_sync import sync_designated_admin
-from routes import admin_credits, auth, credits, export, generate, transcript_insight, transcribe, transcribe_jobs
-from schema_migrate import ensure_credit_schema, ensure_transcription_jobs_schema
+from routes import admin_credits, auth, chat, credits, export, feedback, generate, transcript_insight, transcribe, transcribe_jobs
+from schema_migrate import ensure_chat_schema, ensure_credit_schema, ensure_transcription_jobs_schema
 from security import jwt_secret
 
 # Resolve .env next to this file so it works regardless of cwd. override=True ensures
@@ -29,8 +37,10 @@ async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_credit_schema(engine)
     ensure_transcription_jobs_schema(engine)
+    ensure_chat_schema(engine)
     sync_designated_admin()
     transcribe_jobs.init_transcribe_job_slots()
+    await transcribe_jobs.bootstrap_resume_transcription_jobs()
     yield
 
 
@@ -58,6 +68,8 @@ app.include_router(transcribe_jobs.router, prefix="/api")
 app.include_router(generate.router, prefix="/api")
 app.include_router(transcript_insight.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
+app.include_router(feedback.router, prefix="/api")
+app.include_router(chat.router, prefix="/api")
 
 
 @app.get("/")

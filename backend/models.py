@@ -103,3 +103,88 @@ class TranscriptionJob(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+
+class TranscriptionJobRating(Base):
+    """Note optionnelle (1–5) après transcription — une ligne par tâche ``transcription_jobs``."""
+
+    __tablename__ = "transcription_job_ratings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    transcription_job_id: Mapped[int] = mapped_column(
+        ForeignKey("transcription_jobs.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    stars: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class ChatThread(Base):
+    """Fil de discussion assistant (Groq) — résumé roulant + messages récents."""
+
+    __tablename__ = "chat_threads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(512), nullable=False, server_default="Discussion")
+    rolling_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
+    summary_folded_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    messages: Mapped[list["ChatMessage"]] = relationship(
+        "ChatMessage", back_populates="thread", cascade="all, delete-orphan"
+    )
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("chat_threads.id", ondelete="CASCADE"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Facturation / usage (renseignés surtout pour role="assistant")
+    billed_mru: Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=None)
+    provider_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=None)
+    prompt_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    completion_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    debit_wallet_units: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    wallet_balance_units_after: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    thread: Mapped["ChatThread"] = relationship("ChatThread", back_populates="messages")
+
+
+class AppUserFeedback(Base):
+    """Retours globaux (idées, améliorations) saisis depuis l’app."""
+
+    __tablename__ = "app_user_feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    ui_locale: Mapped[str] = mapped_column(String(16), nullable=False, server_default="fr")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

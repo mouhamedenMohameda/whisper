@@ -1,5 +1,5 @@
 /**
- * Rendu lecture seule : rouge = autre langue ; violet = passage très net à l’oral.
+ * Rendu lecture seule : rouge = autre langue ; accent chaud = passage très net à l’oral.
  *
  * @param {{ view?: { blocks?: Array<Record<string, unknown>> }; emptyHint?: string }} props
  */
@@ -62,9 +62,9 @@ export default function TranscriptMixedView({ view, emptyHint = "Pas de données
         const mergedTip = [tip, relTip].filter(Boolean).join("\n\n") || undefined;
         const text = translated ? String(b?.display ?? b?.original ?? "") : String(b?.display ?? b?.original ?? "");
         const clsForeignRed = translated ? "font-bold text-red-600 dark:text-red-400" : "";
-        const clsReliableViolet = !translated && highRel ? "font-semibold text-violet-700 dark:text-violet-300" : "";
+        const clsReliableAccent = !translated && highRel ? "font-semibold text-amber-700 dark:text-amber-300" : "";
         return (
-          <span key={`tx-${idx}`} title={mergedTip} className={`${clsForeignRed} ${clsReliableViolet}`.trim()}>
+          <span key={`tx-${idx}`} title={mergedTip} className={`${clsForeignRed} ${clsReliableAccent}`.trim()}>
             {text}
           </span>
         );

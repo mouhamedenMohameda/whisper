@@ -21,7 +21,7 @@ function textFromChildren(children) {
     return children.map(textFromChildren).join("");
   }
   if (isValidElement(children)) {
-    return textFromChildren(children.props.children);
+    return textFromChildren(children.props?.children);
   }
   return "";
 }
@@ -91,13 +91,14 @@ export default function LessonViewer({
   usage,
 }) {
   const { t } = useTranslation();
-  const headings = extractNavHeadings(lesson || "");
+  const lessonMd = typeof lesson === "string" ? lesson : "";
+  const headings = extractNavHeadings(lessonMd);
   const u = usage || {};
   const transcriptTok = estimateTokensFromText(transcript);
   const courseGenMru = Number(u.groqLessonBilledMru ?? u.claudeBilledMru ?? 0);
   const insightOptMru = Number(u.groqInsightOptionalBilledMru ?? 0);
   const totalMru = Number(u.whisperBilledMru ?? 0) + courseGenMru + insightOptMru;
-  const splitLesson = useMemo(() => allocateLessonBilledMru(lesson, courseGenMru), [lesson, courseGenMru]);
+  const splitLesson = useMemo(() => allocateLessonBilledMru(lessonMd, courseGenMru), [lessonMd, courseGenMru]);
   const mruTranscriptTab = Number(u.whisperBilledMru ?? 0) + insightOptMru;
   const mruCoursTab = splitLesson.cours;
   const mruQuizTab = splitLesson.quiz;
@@ -112,7 +113,7 @@ export default function LessonViewer({
     </div>
   );
   const foreignN = Number(transcriptMixedView?.foreign_segment_count ?? 0) || 0;
-  /** Blocs structurés disponibles ; violet seulement si le texte cours n’a pas divergé du plain unifié. */
+  /** Blocs structurés disponibles ; surlignage chaud seulement si le texte cours n’a pas divergé du plain unifié. */
   const unifiedPrimary = transcriptMixedView?.blocks?.length > 0;
   const violetInSync =
     unifiedPrimary &&
@@ -150,7 +151,7 @@ export default function LessonViewer({
           <div className="font-display text-xl font-bold text-emerald-900 dark:text-emerald-100">{t("lesson.readyTitle")}</div>
           <p className="mt-1 text-sm leading-relaxed text-emerald-900/85 dark:text-emerald-200/90">{t("lesson.readySub")}</p>
         </div>
-        <ExportButtons lesson={lesson} subject={subject} filename={filename} disabled={false} />
+        <ExportButtons lesson={lessonMd} subject={subject} filename={filename} disabled={false} />
       </div>
 
       <div className="glass-panel rounded-3xl p-5 text-sm shadow-soft">
@@ -230,7 +231,7 @@ export default function LessonViewer({
                 {unifiedPrimary && foreignN > 0 && violetInSync ? (
                   <>
                     <span className="text-slate-300 dark:text-slate-600">•</span>
-                    <span className="text-violet-600 dark:text-violet-400">
+                    <span className="text-brand-600 dark:text-brand-400">
                       {foreignN === 1
                         ? t("lesson.passageOtherSingular", { count: foreignN })
                         : t("lesson.passageOtherPlural", { count: foreignN })}
@@ -239,7 +240,7 @@ export default function LessonViewer({
                 ) : unifiedPrimary && violetInSync ? (
                   <>
                     <span className="text-slate-300 dark:text-slate-600">•</span>
-                    <span className="text-violet-700/90 dark:text-violet-400">{t("lesson.unifiedBadge")}</span>
+                    <span className="text-brand-700/90 dark:text-brand-400">{t("lesson.unifiedBadge")}</span>
                   </>
                 ) : unifiedPrimary && !violetInSync ? (
                   <>
@@ -282,13 +283,13 @@ export default function LessonViewer({
           {activeTab === "lesson" && (
             <article className="glass-panel prose prose-slate max-w-none rounded-3xl p-5 dark:prose-invert prose-headings:scroll-mt-28 prose-headings:font-display prose-li:my-1 prose-table:border-collapse prose-table:text-sm prose-th:bg-slate-100 prose-th:px-3 prose-th:py-2 dark:prose-th:bg-slate-900 prose-td:border prose-td:border-slate-200 prose-td:px-3 prose-td:py-2 dark:prose-td:border-slate-800 sm:p-8">
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                {lesson || ""}
+                {lessonMd}
               </ReactMarkdown>
             </article>
           )}
 
-          {activeTab === "quiz" && <QuizModule lessonMarkdown={lesson} />}
-          {activeTab === "flashcards" && <FlashcardDeck lessonMarkdown={lesson} />}
+          {activeTab === "quiz" && <QuizModule lessonMarkdown={lessonMd} />}
+          {activeTab === "flashcards" && <FlashcardDeck lessonMarkdown={lessonMd} />}
         </div>
 
         {activeTab === "lesson" && headings.length > 1 && (

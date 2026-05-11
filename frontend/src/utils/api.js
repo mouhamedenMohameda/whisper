@@ -658,6 +658,38 @@ export async function generateLesson(transcript, subject, transcriptMixedView, a
   return data;
 }
 
+/**
+ * @param {string[]} jobPublicIds identifiants publics (hex 32) des tâches `/transcribe-jobs`
+ * @param {number} stars 1–5
+ */
+export async function submitTranscriptionJobRatings(jobPublicIds, stars) {
+  const ids = [...new Set((jobPublicIds || []).map((x) => String(x || "").trim()).filter(Boolean))];
+  if (!ids.length) throw new Error("Aucune tâche à noter.");
+  const res = await fetch(apiUrl("/api/feedback/transcription-rating"), {
+    method: "POST",
+    headers: getAuthHeaders(true),
+    body: JSON.stringify({ job_public_ids: ids, stars: Number(stars) }),
+  });
+  const { ok, errorMessage } = await parseJsonResponse(res);
+  if (!ok) throw new Error(errorMessage || "Enregistrement de la note impossible.");
+}
+
+/**
+ * @param {string} message
+ * @param {string} [uiLocale] fr | ar
+ */
+export async function submitAppFeedback(message, uiLocale) {
+  const loc =
+    typeof uiLocale === "string" && uiLocale.trim().toLowerCase().replace(/-/g, "_").startsWith("ar") ? "ar" : "fr";
+  const res = await fetch(apiUrl("/api/feedback/suggestion"), {
+    method: "POST",
+    headers: getAuthHeaders(true),
+    body: JSON.stringify({ message: String(message || "").trim(), ui_locale: loc }),
+  });
+  const { ok, errorMessage } = await parseJsonResponse(res);
+  if (!ok) throw new Error(errorMessage || "Envoi impossible.");
+}
+
 export async function downloadExport(kind, body, downloadName) {
   const res = await fetch(apiUrl(kind === "pdf" ? "/api/export/pdf" : "/api/export/docx"), {
     method: "POST",

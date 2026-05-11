@@ -91,3 +91,39 @@ def ensure_transcription_jobs_schema(engine: Engine) -> None:
                 conn.execute(text("ALTER TABLE transcription_jobs ADD COLUMN wallet_reserved_units INTEGER NOT NULL DEFAULT 0"))
             else:
                 conn.execute(text("ALTER TABLE transcription_jobs ADD COLUMN wallet_reserved_units INTEGER NOT NULL DEFAULT 0"))
+
+
+def ensure_chat_schema(engine: Engine) -> None:
+    """Garantit les colonnes usage/facturation sur `chat_messages`."""
+    insp = inspect(engine)
+    dialect = engine.dialect.name
+    tables = insp.get_table_names()
+    if "chat_messages" not in tables:
+        return
+
+    cols = {c["name"] for c in insp.get_columns("chat_messages")}
+    with engine.begin() as conn:
+        if "billed_mru" not in cols:
+            if dialect == "postgresql":
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN billed_mru DOUBLE PRECISION"))
+            else:
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN billed_mru FLOAT"))
+            cols.add("billed_mru")
+        if "provider_usd" not in cols:
+            if dialect == "postgresql":
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN provider_usd DOUBLE PRECISION"))
+            else:
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN provider_usd FLOAT"))
+            cols.add("provider_usd")
+        if "prompt_tokens" not in cols:
+            conn.execute(text("ALTER TABLE chat_messages ADD COLUMN prompt_tokens INTEGER"))
+            cols.add("prompt_tokens")
+        if "completion_tokens" not in cols:
+            conn.execute(text("ALTER TABLE chat_messages ADD COLUMN completion_tokens INTEGER"))
+            cols.add("completion_tokens")
+        if "debit_wallet_units" not in cols:
+            conn.execute(text("ALTER TABLE chat_messages ADD COLUMN debit_wallet_units INTEGER"))
+            cols.add("debit_wallet_units")
+        if "wallet_balance_units_after" not in cols:
+            conn.execute(text("ALTER TABLE chat_messages ADD COLUMN wallet_balance_units_after INTEGER"))
+            cols.add("wallet_balance_units_after")

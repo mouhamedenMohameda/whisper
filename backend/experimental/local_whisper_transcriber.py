@@ -92,6 +92,11 @@ def get_loaded_model():
         return _load_model_locked()
 
 
+def _is_whisper_empty_tensor_err(exc: BaseException) -> bool:
+    low = str(exc).lower()
+    return "reshape" in low or "0 elements" in low
+
+
 def transcribe_verbose_one_chunk(audio_path: str, speech_language: str, initial_prompt: Optional[str]) -> Any:
     """
     Retourne un objet façon verbose OpenAI (`text`, `segments`, `language`) pour `_merge_whisper_verbose_responses`.
@@ -107,6 +112,12 @@ def transcribe_verbose_one_chunk(audio_path: str, speech_language: str, initial_
             "(les très courts fichiers multimédias posent parfois problème)."
         )
     audio = np.asarray(audio, dtype=np.float32)
+    audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0)
+    # Silence numérique pur : le mel / décodeur peut produire des tenseurs vides (reshape 0 elements).
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    if peak < 1e-6:
+        rng = np.random.default_rng(42)
+        audio = audio + rng.standard_normal(audio.shape, dtype=np.float32) * 1e-5
     # Ne jamais utiliser `pad_or_trim` sur tout le fichier : ça TRONQUE à 30 s (N_SAMPLES).
     # `model.transcribe` fait déjà le découpage en fenêtres de 30 s pour les fichiers longs.
     sr = whisper.audio.SAMPLE_RATE
@@ -149,17 +160,47 @@ def transcribe_verbose_one_chunk(audio_path: str, speech_language: str, initial_
     kwargs["condition_on_previous_text"] = chain_explicit in ("1", "true", "yes", "on")
 
     model = get_loaded_model()
+
+    def _run(extra: Optional[dict[str, Any]] = None) -> Any:
+        call_kw = dict(kwargs)
+        if extra:
+            call_kw.update(extra)
+        return model.transcribe(audio, **call_kw)
+
     try:
-        result = model.transcribe(audio, **kwargs)
+        result = _run()
     except (RuntimeError, ValueError) as e:
-        low = str(e).lower()
-        if "reshape" in low or "0 elements" in low:
-            logger.warning("LOCAL_WHISPER: reshape / tenseur vide — %s", e, exc_info=True)
+        if not _is_whisper_empty_tensor_err(e):
+            raise
+        logger.warning("LOCAL_WHISPER: reshape / tenseur vide — %s", e, exc_info=True)
+        # Souvent AMP (fp16) ou décodage multi-température sur une fenêtre quasi vide.
+        last_exc: BaseException = e
+        retry_plan: list[tuple[str, dict[str, Any]]] = []
+        if kwargs.get("fp16"):
+            retry_plan.append(("fp16=False", {"fp16": False}))
+        retry_plan.append(("fp16=False,temperature=0", {"fp16": False, "temperature": 0.0}))
+        if kwargs.get("condition_on_previous_text"):
+            retry_plan.append(
+                (
+                    "fp16=False,temperature=0,condition_on_previous_text=False",
+                    {"fp16": False, "temperature": 0.0, "condition_on_previous_text": False},
+                )
+            )
+        for label, extra in retry_plan:
+            try:
+                logger.warning("LOCAL_WHISPER: nouvel essai après erreur mel/décodeur (%s).", label)
+                result = _run(extra)
+                break
+            except (RuntimeError, ValueError) as e2:
+                last_exc = e2
+                if not _is_whisper_empty_tensor_err(e2):
+                    raise
+                logger.warning("LOCAL_WHISPER: retry %s a échoué — %s", label, e2)
+        else:
             raise RuntimeError(
                 "Segment audio trop court ou illisible pour Whisper local après découpage "
                 "(souvent : exporte au format MP3/M4A audio pur et au moins ~2–3 s de parole)."
-            ) from e
-        raise
+            ) from last_exc
     segments_in = result.get("segments") or []
 
     cleaned: list[dict[str, Any]] = []

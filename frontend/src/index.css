@@ -30,16 +30,34 @@
   }
 
   ::selection {
-    @apply bg-brand-500/25 text-slate-900 dark:bg-brand-400/30 dark:text-white;
+    @apply bg-brand-500/30 text-slate-900 dark:bg-brand-500/35 dark:text-white;
   }
 
   .safe-pad-x {
-    padding-left: max(1rem, env(safe-area-inset-left));
-    padding-right: max(1rem, env(safe-area-inset-right));
+    padding-left: max(0.75rem, min(1.25rem, 4vw), env(safe-area-inset-left, 0px));
+    padding-right: max(0.75rem, min(1.25rem, 4vw), env(safe-area-inset-right, 0px));
+  }
+
+  @media (min-width: 640px) {
+    .safe-pad-x {
+      padding-left: max(1rem, env(safe-area-inset-left, 0px));
+      padding-right: max(1rem, env(safe-area-inset-right, 0px));
+    }
   }
 
   .safe-pad-b {
     padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  /** Défilement horizontal « app-like » : pas de chaînage vers la page, barre masquée. */
+  .scroll-x-contained {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .scroll-x-contained::-webkit-scrollbar {
+    display: none;
   }
 }
 
@@ -52,14 +70,14 @@
     @apply border border-white/80 bg-white/70 shadow-soft-lg backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/65 dark:shadow-black/35;
   }
 
-  /* Fond léger façon grille (premium, discret). */
+  /* Fond grille chaude (orange très discret). */
   .bg-dot-grid {
-    background-image: radial-gradient(circle at 1px 1px, rgb(15 23 42 / 0.06) 1px, transparent 0);
+    background-image: radial-gradient(circle at 1px 1px, rgb(234 88 12 / 0.055) 1px, transparent 0);
     background-size: 28px 28px;
   }
 
   .dark .bg-dot-grid {
-    background-image: radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.05) 1px, transparent 0);
+    background-image: radial-gradient(circle at 1px 1px, rgb(251 146 60 / 0.07) 1px, transparent 0);
   }
 
   /* Page admin seule : padding safe-area fiable (évite soucis de parsing des utilitaires Tailwind arbitraires sur WebKit). */
@@ -87,21 +105,21 @@
   .ring-gradient-brand {
     box-shadow:
       inset 0 1px 0 0 rgb(255 255 255 / 0.55),
-      0 0 0 1px rgb(99 102 241 / 0.09),
-      0 28px 64px -32px rgb(79 70 229 / 0.22),
-      0 12px 32px -20px rgb(17 24 39 / 0.12);
+      0 0 0 1px rgb(249 115 22 / 0.12),
+      0 28px 64px -32px rgb(234 88 12 / 0.2),
+      0 12px 32px -20px rgb(17 24 39 / 0.1);
   }
 
   .dark .ring-gradient-brand {
     box-shadow:
       inset 0 1px 0 0 rgb(255 255 255 / 0.05),
-      0 0 0 1px rgb(129 140 248 / 0.12),
+      0 0 0 1px rgb(251 146 60 / 0.14),
       0 28px 64px -32px rgb(0 0 0 / 0.55),
-      0 12px 32px -20px rgb(67 56 202 / 0.15);
+      0 12px 32px -20px rgb(194 65 12 / 0.18);
   }
 
   .text-gradient-brand {
-    @apply bg-gradient-to-r from-brand-600 via-violet-600 to-cyan-600 bg-clip-text text-transparent dark:from-brand-400 dark:via-violet-400 dark:to-cyan-400;
+    @apply bg-gradient-to-r from-brand-600 via-amber-500 to-rose-500 bg-clip-text text-transparent dark:from-brand-400 dark:via-amber-400 dark:to-rose-400;
   }
 
   @media (prefers-reduced-motion: reduce) {

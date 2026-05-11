@@ -133,10 +133,10 @@ export default function CreditsPage({ onBack, onWalletUpdated }) {
     return (
       <div className="relative mx-auto max-w-2xl px-1">
         <div
-          className="motion-reduce-hide mx-auto flex min-h-[12rem] max-w-md flex-col items-center justify-center gap-3 rounded-3xl border border-violet-200/60 bg-gradient-to-br from-white via-violet-50/80 to-fuchsia-50/60 px-6 py-10 text-center shadow-soft dark:border-violet-900/40 dark:from-slate-900 dark:via-violet-950/40 dark:to-fuchsia-950/30"
+          className="motion-reduce-hide mx-auto flex min-h-[12rem] max-w-md flex-col items-center justify-center gap-3 rounded-3xl border border-brand-200/60 bg-gradient-to-br from-white via-brand-50/80 to-amber-50/55 px-6 py-10 text-center shadow-soft dark:border-brand-900/40 dark:from-slate-900 dark:via-brand-950/35 dark:to-amber-950/25"
           aria-busy
         >
-          <div className="h-9 w-9 animate-pulse rounded-full bg-gradient-to-br from-brand-500 to-violet-600 opacity-80 dark:from-brand-400 dark:to-violet-500" />
+          <div className="h-9 w-9 animate-pulse rounded-full bg-gradient-to-br from-brand-500 to-amber-600 opacity-80 dark:from-brand-400 dark:to-amber-500" />
           <p className="text-sm font-medium text-slate-600 dark:text-slate-300">{t("creditsPage.loadingWallet")}</p>
         </div>
       </div>
@@ -201,8 +201,8 @@ export default function CreditsPage({ onBack, onWalletUpdated }) {
         className="pointer-events-none absolute inset-0 -z-10 overflow-hidden rounded-[2.5rem] opacity-90"
         aria-hidden
       >
-        <div className="absolute -left-1/4 top-0 h-[28rem] w-[28rem] rounded-full bg-gradient-to-br from-violet-400/25 via-fuchsia-400/20 to-transparent blur-3xl motion-safe:animate-blob-drift dark:from-violet-600/20 dark:via-fuchsia-600/15" />
-        <div className="absolute -right-1/4 bottom-0 h-[24rem] w-[24rem] rounded-full bg-gradient-to-tl from-cyan-400/20 via-brand-400/15 to-transparent blur-3xl motion-safe:animate-blob-drift-reverse dark:from-cyan-500/15 dark:via-brand-500/12" />
+        <div className="absolute -left-1/4 top-0 h-[28rem] w-[28rem] rounded-full bg-gradient-to-br from-brand-400/28 via-amber-400/18 to-transparent blur-3xl motion-safe:animate-blob-drift dark:from-brand-600/18 dark:via-amber-600/12" />
+        <div className="absolute -right-1/4 bottom-0 h-[24rem] w-[24rem] rounded-full bg-gradient-to-tl from-rose-300/22 via-brand-400/15 to-transparent blur-3xl motion-safe:animate-blob-drift-reverse dark:from-rose-600/12 dark:via-brand-500/12" />
         <div className="absolute inset-0 bg-dot-grid opacity-[0.35] dark:opacity-25" />
       </div>
 
@@ -210,7 +210,7 @@ export default function CreditsPage({ onBack, onWalletUpdated }) {
         <button
           type="button"
           onClick={onBack}
-          className="group inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/60 px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur-sm transition hover:border-violet-300/70 hover:bg-white hover:text-violet-900 dark:border-slate-700/80 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:border-violet-800/60 dark:hover:bg-slate-900/80 dark:hover:text-white"
+          className="group inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/60 px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur-sm transition hover:border-brand-300/70 hover:bg-white hover:text-brand-900 dark:border-slate-700/80 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:border-brand-700/60 dark:hover:bg-slate-900/80 dark:hover:text-white"
         >
           {t("common.back")}
         </button>
@@ -221,15 +221,15 @@ export default function CreditsPage({ onBack, onWalletUpdated }) {
         className="relative overflow-hidden rounded-[1.75rem] ring-gradient-brand motion-safe:animate-fade-in-up"
         style={{ animationDelay: "40ms" }}
       >
-        <div className="absolute inset-0 bg-gradient-to-br from-violet-600/[0.07] via-fuchsia-500/[0.05] to-cyan-500/[0.06] dark:from-violet-500/10 dark:via-fuchsia-600/8 dark:to-cyan-500/10" />
-        <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-gradient-to-br from-brand-400/30 to-violet-600/20 blur-3xl dark:from-brand-500/20 dark:to-violet-500/15" />
-        <div className="absolute -bottom-12 -left-10 h-44 w-44 rounded-full bg-gradient-to-tr from-cyan-400/25 to-transparent blur-2xl dark:from-cyan-500/15" />
+        <div className="absolute inset-0 bg-gradient-to-br from-brand-600/[0.08] via-amber-500/[0.05] to-rose-500/[0.05] dark:from-brand-500/10 dark:via-amber-600/8 dark:to-rose-600/8" />
+        <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-gradient-to-br from-brand-400/30 to-amber-600/22 blur-3xl dark:from-brand-500/20 dark:to-amber-500/15" />
+        <div className="absolute -bottom-12 -left-10 h-44 w-44 rounded-full bg-gradient-to-tr from-rose-300/25 to-transparent blur-2xl dark:from-rose-600/12" />
 
         <div className="relative border border-white/80 bg-white/70 p-6 shadow-soft backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/65 sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0 flex-1 space-y-4">
               <div className="flex items-start gap-3">
-                <span className="mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-600 to-violet-600 text-white shadow-lg shadow-brand-600/25 dark:shadow-brand-900/40">
+                <span className="mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-600 to-amber-600 text-white shadow-lg shadow-brand-600/25 dark:shadow-brand-900/40">
                   <IconWallet className="h-6 w-6" />
                 </span>
                 <div className="min-w-0">
@@ -248,7 +248,7 @@ export default function CreditsPage({ onBack, onWalletUpdated }) {
                 </p>
                 <p className="font-display text-fluid-hero mt-1 font-black tabular-nums tracking-tight text-gradient-brand">
                   {balanceStr}
-                  <span className="ms-2 align-middle text-xl font-bold text-violet-400/90 dark:text-violet-300/90">
+                  <span className="ms-2 align-middle text-xl font-bold text-brand-500/90 dark:text-brand-400/90">
                     MRU
                   </span>
                 </p>
@@ -317,8 +317,8 @@ export default function CreditsPage({ onBack, onWalletUpdated }) {
           <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">{t("creditsPage.payNumbersTitle")}</p>
           <div className="grid gap-3 sm:grid-cols-2">
             {[
-              { label: t("creditsPage.bankily"), num: "42986738", accent: "from-violet-600/90 to-fuchsia-600/80" },
-              { label: t("creditsPage.sedad"), num: "32164356", accent: "from-cyan-600/85 to-brand-600/85" },
+              { label: t("creditsPage.bankily"), num: "42986738", accent: "from-brand-600/90 to-rose-600/75" },
+              { label: t("creditsPage.sedad"), num: "32164356", accent: "from-amber-600/85 to-brand-600/85" },
             ].map(({ label, num, accent }) => (
               <div
                 key={num}
@@ -336,7 +336,7 @@ export default function CreditsPage({ onBack, onWalletUpdated }) {
                     <button
                       type="button"
                       onClick={() => void copyNumber(num)}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200/90 bg-slate-50 px-2.5 py-1.5 text-[11px] font-bold text-violet-700 shadow-sm transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-900 dark:border-slate-600 dark:bg-slate-900 dark:text-violet-300 dark:hover:border-violet-700 dark:hover:bg-slate-800"
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200/90 bg-slate-50 px-2.5 py-1.5 text-[11px] font-bold text-brand-700 shadow-sm transition hover:border-brand-300 hover:bg-brand-50 hover:text-brand-900 dark:border-slate-600 dark:bg-slate-900 dark:text-brand-300 dark:hover:border-brand-700 dark:hover:bg-slate-800"
                       title={t("creditsPage.copyNumber")}
                     >
                       <IconCopy className="h-3.5 w-3.5" />
@@ -391,19 +391,19 @@ export default function CreditsPage({ onBack, onWalletUpdated }) {
               setDragActive(false);
               if (!busy) setFileFromList(e.dataTransfer.files);
             }}
-            className={`group relative flex w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed px-4 py-10 text-center transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 ${
+            className={`group relative flex w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed px-4 py-10 text-center transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 ${
               busy ? "cursor-not-allowed opacity-60" : ""
             } ${
               dragActive
-                ? "border-violet-500 bg-violet-50/90 dark:border-violet-400 dark:bg-violet-950/50"
-                : "border-slate-300/90 bg-slate-50/50 hover:border-violet-400/80 hover:bg-violet-50/40 dark:border-slate-600 dark:bg-slate-900/40 dark:hover:border-violet-600 dark:hover:bg-violet-950/30"
+                ? "border-brand-500 bg-brand-50/90 dark:border-brand-400 dark:bg-brand-950/45"
+                : "border-slate-300/90 bg-slate-50/50 hover:border-brand-400/80 hover:bg-brand-50/40 dark:border-slate-600 dark:bg-slate-900/40 dark:hover:border-brand-600 dark:hover:bg-brand-950/28"
             }`}
           >
             <span
               className={`inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-lg transition group-hover:scale-105 ${
                 file
                   ? "from-emerald-500 to-teal-600 shadow-emerald-500/25"
-                  : "from-brand-600 to-violet-600 shadow-brand-600/25"
+                  : "from-brand-600 to-amber-600 shadow-brand-600/25"
               }`}
             >
               {file ? (
@@ -426,7 +426,7 @@ export default function CreditsPage({ onBack, onWalletUpdated }) {
                   </span>
                   <button
                     type="button"
-                    className="text-xs font-bold text-violet-600 underline-offset-2 hover:underline dark:text-violet-400"
+                    className="text-xs font-bold text-brand-600 underline-offset-2 hover:underline dark:text-brand-400"
                     onClick={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
@@ -445,7 +445,7 @@ export default function CreditsPage({ onBack, onWalletUpdated }) {
         <button
           type="submit"
           disabled={busy || !file}
-          className="hover-lift group relative w-full overflow-hidden rounded-2xl bg-gradient-to-r from-brand-600 via-violet-600 to-fuchsia-600 px-6 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-[1.05] disabled:cursor-not-allowed disabled:opacity-45 dark:from-brand-500 dark:via-violet-500 dark:to-fuchsia-600"
+          className="hover-lift group relative w-full overflow-hidden rounded-2xl bg-gradient-to-r from-brand-600 via-amber-500 to-rose-500 px-6 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-[1.05] disabled:cursor-not-allowed disabled:opacity-45 dark:from-brand-500 dark:via-amber-500 dark:to-rose-600"
         >
           <span className="relative z-10">{t("creditsPage.sendProof")}</span>
           <span
@@ -470,7 +470,7 @@ export default function CreditsPage({ onBack, onWalletUpdated }) {
             requests.map((r) => (
               <li
                 key={r.id}
-                className="relative overflow-hidden rounded-2xl border border-slate-200/85 bg-gradient-to-r from-white/95 to-slate-50/90 px-4 py-3.5 shadow-sm transition hover:border-violet-200/90 hover:shadow-md dark:border-slate-700/85 dark:from-slate-900/90 dark:to-slate-950/90 dark:hover:border-violet-900/60"
+                className="relative overflow-hidden rounded-2xl border border-slate-200/85 bg-gradient-to-r from-white/95 to-slate-50/90 px-4 py-3.5 shadow-sm transition hover:border-brand-200/90 hover:shadow-md dark:border-slate-700/85 dark:from-slate-900/90 dark:to-slate-950/90 dark:hover:border-brand-900/50"
               >
                 <span
                   className={`absolute inset-y-0 start-0 w-1 rounded-e-sm ${

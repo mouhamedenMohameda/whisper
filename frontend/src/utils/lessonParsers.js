@@ -1,3 +1,10 @@
+/** Titres ## qui introduisent une section fiches / flashcards (FR/EN/AR). */
+function isFlashcardsSectionTitle(t) {
+  return /(flashcards|fiches|cartes?\s*m[ée]moire|بطاقات|فلاش\s*كارد|بطاقة\s*مراجعة)/i.test(
+    String(t || ""),
+  );
+}
+
 export function slugify(raw) {
   const s = String(raw || "")
     .toLowerCase()
@@ -33,13 +40,10 @@ export function parseQuiz(md) {
       String(t || ""),
     );
   const isQuizHeadingAr = (t) => /(اختبار|امتحان|أسئلة|اسئلة|اختبار\s*قصير)/i.test(String(t || ""));
-  const isFlashHeading = (t) =>
-    /(flashcards|fiches|cartes?\s*m[ée]moire|بطاقات|فلاش\s*كارد|بطاقة\s*مراجعة)/i.test(String(t || ""));
-
   let section = text;
   const start = h2.findIndex((h) => isQuizHeading(h.title) || isQuizHeadingAr(h.title));
   if (start !== -1) {
-    const end = h2.slice(start + 1).find((h) => isFlashHeading(h.title) || /^(\d+)\.\s*/.test(h.title));
+    const end = h2.slice(start + 1).find((h) => isFlashcardsSectionTitle(h.title) || /^(\d+)\.\s*/.test(h.title));
     const s0 = h2[start].idx;
     const s1 = end ? end.idx : text.length;
     section = text.slice(s0, s1);
@@ -159,27 +163,76 @@ export function parseQuiz(md) {
   return out;
 }
 
-export function parseFlashcards(md) {
-  const section =
-    md.split(/##\s*7\.\s*FLASHCARDS/i)[1]?.split(/##\s*8\./i)[0] || "";
-  const cards = [];
+/**
+ * Extrait le bloc markdown des fiches : même logique flexible que le quiz (titres ##),
+ * puis repli sur la structure numérotée demandée au modèle.
+ */
+function extractFlashcardsMarkdownSection(text) {
+  const md = String(text || "");
+  if (!md.trim()) return "";
 
-  const sameLine = /Q:\s*(.+?)\s*\/\s*A:\s*(.+)/gi;
+  const h2 = [...md.matchAll(/^##\s+(.+)$/gm)].map((m) => ({
+    title: (m[1] || "").trim(),
+    idx: m.index ?? 0,
+  }));
+
+  const flashIdx = h2.findIndex((h) => isFlashcardsSectionTitle(h.title));
+  if (flashIdx !== -1) {
+    const s0 = h2[flashIdx].idx;
+    const next = h2[flashIdx + 1];
+    return next ? md.slice(s0, next.idx) : md.slice(s0);
+  }
+
+  let s = md.split(/##\s*7\.\s*FLASHCARDS/i)[1]?.split(/##\s*8\./i)[0] || "";
+  if (s.trim()) return s;
+
+  s = md.split(/##\s*7\./i)[1]?.split(/##\s*8\./i)[0] || "";
+  if (s.trim()) return s;
+
+  // Dernier recours : fiches après le quiz, avant la section 8 (titres parfois non standard).
+  const tail = md.split(/##\s*6\.\s*PRACTICE QUIZ/i)[1]?.split(/##\s*8\./i)[0] || "";
+  if (/\bQ\s*:\s*/i.test(tail) && /\bA\s*:\s*/i.test(tail) && /\/\s*A\s*:\s*|^\s*A\s*:/im.test(tail)) {
+    return tail;
+  }
+
+  return "";
+}
+
+export function parseFlashcards(md) {
+  let section = extractFlashcardsMarkdownSection(md);
+  if (!section.trim() && /\bQ\s*:\s*.+\bA\s*:\s*.+/is.test(String(md || ""))) {
+    section = String(md || "");
+  }
+
+  const seen = new Set();
+  /** @type {{ q: string; a: string }[]} */
+  const cards = [];
+  const push = (q, a) => {
+    const qq = String(q || "").trim();
+    const aa = String(a || "").trim();
+    if (!qq || !aa) return;
+    const key = `${qq}\u241F${aa}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    cards.push({ q: qq, a: aa });
+  };
+
   let m;
+  const sameLine = /\bQ\s*:\s*(.+?)\s*\/\s*A\s*:\s*(.+)/gi;
   while ((m = sameLine.exec(section)) !== null) {
-    cards.push({ q: m[1].trim(), a: m[2].trim() });
+    push(m[1], m[2]);
   }
 
   const multiline =
-    /\*\*Card\s*\d+\*\*[\s\r\n]*Q:\s*([\s\S]+?)[\s\r\n]+A:\s*([\s\S]+?)(?=\*\*Card|\n##|$)/gi;
+    /\*\*(?:Card|Carte|Fiche)\s*\d+\*\*[\s\r\n]*Q\s*:\s*([\s\S]+?)[\s\r\n]+A\s*:\s*([\s\S]+?)(?=\*\*(?:Card|Carte|Fiche)\s*\d+\*\*|\r?\n##|$)/gi;
   while ((m = multiline.exec(section)) !== null) {
-    cards.push({ q: m[1].trim(), a: m[2].trim() });
+    push(m[1], m[2]);
   }
 
-  const loose = /Q:\s*([\s\S]+?)\n+\s*A:\s*([\s\S]+?)(?=\n\s*Q:|\n##|$)/gi;
-  if (cards.length < 10) {
+  const loose = /\bQ\s*:\s*([\s\S]+?)\r?\n+\s*A\s*:\s*([\s\S]+?)(?=\r?\n\s*Q\s*:\s|\r?\n##|\r?\n\*\*(?:Card|Carte|Fiche)\s*\d+\*\*|$)/gi;
+  if (cards.length < 12) {
     while ((m = loose.exec(section)) !== null) {
-      cards.push({ q: m[1].trim(), a: m[2].trim() });
+      push(m[1], m[2]);
     }
   }
 
