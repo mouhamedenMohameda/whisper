@@ -1,6 +1,7 @@
 import io
 import re
 from datetime import datetime
+import asyncio
 from typing import Annotated, Optional
 
 from credits_wallet import debit_credits
@@ -217,7 +218,7 @@ async def export_pdf(
     if in_table and table_rows:
         _flush_table_pdf(story, table_rows, accent, light)
 
-    doc.build(story)
+    await asyncio.to_thread(doc.build, story)
     buffer.seek(0)
 
     _, billed_mru = export_job_billed()
@@ -342,7 +343,7 @@ async def export_docx(
     flush_table()
 
     buffer = io.BytesIO()
-    doc.save(buffer)
+    await asyncio.to_thread(doc.save, buffer)
     buffer.seek(0)
 
     _, billed_mru_d = export_job_billed()

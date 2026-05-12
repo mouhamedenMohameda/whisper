@@ -162,7 +162,7 @@ def _should_autotitle_thread(th: ChatThread, msgs: list[ChatMessage]) -> bool:
     return user_count == 1 and asst_count == 0
 
 
-def _maybe_autotitle_thread(db: Session, *, th: ChatThread, first_user_message: str) -> Optional[str]:
+def _generate_autotitle_sync(first_user_message: str) -> Optional[str]:
     if not first_user_message or not first_user_message.strip():
         return None
     try:
@@ -178,11 +178,7 @@ def _maybe_autotitle_thread(db: Session, *, th: ChatThread, first_user_message: 
         title = title.replace("\n", " ").strip()[:120]
         if not title:
             return None
-        th.title = title
-        db.add(th)
-        db.commit()
-        db.refresh(th)
-        return th.title
+        return title
     except Exception:
         logger.warning("chat autotitle failure", exc_info=True)
         return None
@@ -247,6 +243,15 @@ async def post_message_stream(
     if not content:
         raise HTTPException(status_code=400, detail="Message vide.")
 
+    est_history = estimate_tokens_from_chars(content)
+    max_cost_mru = chat_assistant_billed_mru(0, 0, est_history + 4000, 1000)[1]
+    max_cost_units = billed_mru_to_wallet_units_debit(max_cost_mru)
+    if user.credit_balance < max_cost_units:
+        raise HTTPException(
+            status_code=402, 
+            detail=f"Solde insuffisant pour maintenir la discussion (minimum conseillé : {wallet_units_to_mru_display(max_cost_units)} MRU)."
+        )
+
     um = ChatMessage(thread_id=th.id, role="user", content=content)
     db.add(um)
     db.commit()
@@ -258,7 +263,14 @@ async def post_message_stream(
     ).all()
     thread_title: Optional[str] = None
     if _should_autotitle_thread(th, msgs):
-        thread_title = _maybe_autotitle_thread(db, th=th, first_user_message=content)
+        import asyncio
+        new_title = await asyncio.to_thread(_generate_autotitle_sync, content)
+        if new_title:
+            th.title = new_title
+            db.add(th)
+            db.commit()
+            db.refresh(th)
+            thread_title = th.title
     archive = msgs[:-N] if len(msgs) > N else []
     recent = msgs[-N:] if len(msgs) > N else msgs
 
@@ -271,7 +283,9 @@ async def post_message_stream(
             new_seg = archive[int(th.summary_folded_count or 0) :]
             pairs = [(m.role, m.content) for m in new_seg if m.role in ("user", "assistant")]
             if pairs:
-                new_sum, summary_pt, summary_ct = merge_rolling_summary(
+                import asyncio
+                new_sum, summary_pt, summary_ct = await asyncio.to_thread(
+                    merge_rolling_summary,
                     client=client,
                     model=sum_model,
                     prior_summary=th.rolling_summary or "",
@@ -312,9 +326,10 @@ async def post_message_stream(
     async def event_gen():
         full_text: list[str] = []
         main_pt, main_ct = 0, 0
+        billed = False
         try:
             async for item in iterate_in_threadpool(stream_iter):
-                if isinstance(item, dict):
+                if getattr(item, "__class__", None) is dict or isinstance(item, dict):
                     u = item.get("_usage") or {}
                     main_pt = int(u.get("prompt_tokens") or 0)
                     main_ct = int(u.get("completion_tokens") or 0)
@@ -376,6 +391,7 @@ async def post_message_stream(
                             "spent_mru_this_request": wallet_units_to_mru_display(charged),
                         }
                     yield sse_event(payload)
+                    billed = True
                 else:
                     full_text.append(str(item))
                     yield sse_event({"delta": str(item)})
@@ -385,6 +401,41 @@ async def post_message_stream(
         except Exception:
             logger.exception("chat stream failure")
             yield sse_event({"error": "Erreur interne pendant la réponse."})
+        finally:
+            if not billed and full_text:
+                # Si le client se déconnecte brutalement, le flux s'arrête mais le texte partiel a été calculé.
+                txt = "".join(full_text)
+                if main_pt == 0 and main_ct == 0:
+                    main_pt = estimate_tokens_from_chars("\n".join(m.get("content", "") for m in api_messages))
+                    main_ct = estimate_tokens_from_chars(txt)
+                ndb = SessionLocal()
+                try:
+                    total_usd, billed_mru = chat_assistant_billed_mru(summary_pt, summary_ct, main_pt, main_ct)
+                    total_usd = _nonneg_float(total_usd)
+                    billed_mru = _nonneg_mru_billed(billed_mru)
+                    am = ChatMessage(
+                        thread_id=th.id,
+                        role="assistant",
+                        content=txt,
+                        billed_mru=float(billed_mru),
+                        provider_usd=float(total_usd),
+                        prompt_tokens=int(main_pt),
+                        completion_tokens=int(main_ct),
+                    )
+                    ndb.add(am)
+                    ndb.commit()
+                    ndb.refresh(am)
+                    units = billed_mru_to_wallet_units_debit(billed_mru)
+                    u2 = ndb.get(User, user_id)
+                    new_bal, charged = debit_credits(ndb, u2, units)
+                    am.debit_wallet_units = int(charged)
+                    am.wallet_balance_units_after = int(new_bal) if new_bal is not None else None
+                    ndb.add(am)
+                    ndb.commit()
+                except Exception:
+                    logger.exception("Failed to bill partial chat stream")
+                finally:
+                    ndb.close()
 
     return StreamingResponse(
         event_gen(),
@@ -429,7 +480,13 @@ def post_message_sync(
     ).all()
     thread_title: Optional[str] = None
     if _should_autotitle_thread(th, msgs):
-        thread_title = _maybe_autotitle_thread(db, th=th, first_user_message=content)
+        new_title = _generate_autotitle_sync(content)
+        if new_title:
+            th.title = new_title
+            db.add(th)
+            db.commit()
+            db.refresh(th)
+            thread_title = th.title
     archive = msgs[:-N] if len(msgs) > N else []
     recent = msgs[-N:] if len(msgs) > N else msgs
 

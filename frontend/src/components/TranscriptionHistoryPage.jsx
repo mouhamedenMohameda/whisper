@@ -25,24 +25,33 @@ function formatLanguageCell(row) {
 function TechnicalConsumptionBlock({ usage = {}, whisperMin, mruEst, t }) {
   const u = usage;
   return (
-    <dl className="grid grid-cols-1 gap-3 text-xs text-slate-600 dark:text-slate-400 sm:grid-cols-3">
-      <div>
-        <dt className="text-slate-500 dark:text-slate-500">{t("history.colDur")}</dt>
-        <dd className="font-medium text-slate-800 dark:text-slate-200">
-          {whisperMin === "—" ? "—" : `${whisperMin} min`}
-        </dd>
+    <div className="space-y-3">
+      <dl className="grid grid-cols-1 gap-3 text-xs text-slate-600 dark:text-slate-400 sm:grid-cols-3">
+        <div>
+          <dt className="text-slate-500 dark:text-slate-500">{t("history.colDur")}</dt>
+          <dd className="font-medium text-slate-800 dark:text-slate-200">
+            {whisperMin === "—" ? "—" : `${whisperMin} min`}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-slate-500 dark:text-slate-500">{t("history.colTok")}</dt>
+          <dd className="tabular-nums font-medium text-slate-800 dark:text-slate-200">
+            {Number(u.whisperApiEstimatedTokensSum || 0).toLocaleString("fr-FR")}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-slate-500 dark:text-slate-500">{t("history.colMru")}</dt>
+          <dd className="font-semibold text-brand-700 dark:text-brand-300">~{formatMru(mruEst)} MRU</dd>
+        </div>
+      </dl>
+      <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+         {u.transcription_engine && (
+           <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+             ⚙️ {u.transcription_engine} {u.retail_mru_per_hour_applied != null ? `· ${u.retail_mru_per_hour_applied} MRU/h` : ""}
+           </span>
+         )}
       </div>
-      <div>
-        <dt className="text-slate-500 dark:text-slate-500">{t("history.colTok")}</dt>
-        <dd className="tabular-nums font-medium text-slate-800 dark:text-slate-200">
-          {Number(u.whisperApiEstimatedTokensSum || 0).toLocaleString("fr-FR")}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-slate-500 dark:text-slate-500">{t("history.colMru")}</dt>
-        <dd className="font-semibold text-brand-700 dark:text-brand-300">~{formatMru(mruEst)} MRU</dd>
-      </div>
-    </dl>
+    </div>
   );
 }
 

@@ -1255,6 +1255,8 @@ export default function App() {
       /** @type {{ label: string, passages: unknown }[]} */
       const asrPieces = [];
 
+      /** @type {Record<string, unknown>} */
+      let data;
       for (let i = 0; i < n; i += 1) {
         const f = files[i];
         setTranscribeLive((prev) => ({
@@ -1304,8 +1306,6 @@ export default function App() {
 
         syncRowProgress();
 
-        /** @type {Record<string, unknown>} */
-        let data;
         try {
           const enq = await enqueueTranscribeJobWithXHR(f, subject, speechLanguage, {
             transcriptionEngine,
@@ -1383,6 +1383,13 @@ export default function App() {
         mixComp += Number(su.segment_translation_completion_tokens ?? 0);
         groqPromptTot += Number(su.groq_insight_prompt_tokens ?? 0);
         groqCompTot += Number(su.groq_insight_completion_tokens ?? 0);
+        
+        // Capture des infos moteur / tarif
+        const engineId = data.transcription_engine || su.transcription_engine;
+        const engineRate = su.retail_mru_per_hour_applied;
+        
+        console.log("[DEBUG] Transcribe Data:", { engineId, engineRate, su });
+
         if (data.groq_transcript_truncated) groqTruncAny = true;
         if (data.groq_insight_applied) groqAppliedFlag = true;
         const inferred = typeof data.inferred_subject === "string" ? data.inferred_subject.trim() : "";
@@ -1446,7 +1453,11 @@ export default function App() {
         groqInsightPromptTokens: groqPromptTot,
         groqInsightCompletionTokens: groqCompTot,
         groqInsightOptionalBilledMru: 0,
+        // Nouvelles infos pour l'affichage du modèle
+        transcriptionEngine: data?.transcription_engine || data?.usage?.transcription_engine,
+        retailMruPerHourApplied: data?.usage?.retail_mru_per_hour_applied,
       };
+      console.log("[DEBUG] Usage Snapshot:", usageSnapshot);
       setSessionUsage(usageSnapshot);
 
       const hid = newHistoryId();

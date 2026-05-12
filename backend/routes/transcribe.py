@@ -497,7 +497,7 @@ def _ffmpeg_extract_mono_mp3_chunk(
 
 def _prepare_whisper_chunks(
     tmp_path: str,
-    estimated_duration: Optional[float],
+    estimated_duration: float,
     *,
     transcription_engine: str = "openai",
 ) -> tuple[list[tuple[str, float]], list[str], bool]:
@@ -525,20 +525,7 @@ def _prepare_whisper_chunks(
     if orig_sz > 0 and orig_sz <= budget:
         return [(tmp_path, 0.0)], [], False
 
-    total_dur = estimated_duration if estimated_duration and estimated_duration > 0 else None
-    if total_dur is None:
-        total_dur = _ffprobe_duration_seconds(tmp_path)
-
-    if total_dur is None or total_dur <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Impossible de lire la durée du média pour le découpage automatique. "
-                "Vérifie que ffmpeg/ffprobe est installé sur le serveur, ou réencode en MP3/M4A avec métadonnées."
-            ),
-        )
-
-    _reject_if_duration_exceeds(total_dur)
+    total_dur = estimated_duration
 
     br_str = _select_preprocess_mp3_bitrate(total_dur)
     filt = os.getenv(
@@ -1338,75 +1325,87 @@ def _semantic_polish_one_batch_openai(
     inp = {"subject": subject_snip[:400], "preceding_text_tail": (approximate_prev_tail or "")[-900:], "segments": items}
     payload_u = json.dumps(inp, ensure_ascii=False)
 
-    if speech_language == "fr":
-        sys_m = (
-            "Tu prépares une retranscription de cours pour des étudiants. "
-            "Tu reçois des segments Whisper en français forcé (langue officielle=déjà française). "
-            "Corrige UNIQUEMENT les erreurs de reconnaissance VOCALE manifestes où le français écrit doit être restauré dans un contexte pédagogique cohérent.\n\n"
-            "Règles strictes :\n"
-            "- Ne change PAS le fond : ne résume pas, n’explique pas, n’« améliore » pas la phrase si elle est plausible.\n"
-            "- Respecte jargon / noms propres plausiblement présents dans le cours (thème indiqué par subject).\n"
-            "- Gère intelligemment les confusions HOMOPHONES / quasi-homophones typiques DU FRANÇAIS PARLÉ vers l’écrit quand la cohérence grammaticale + pédagogique le demande fortement "
-            '(exemple d’illus : « encore » vs liaison « … un corps … » aberrante ponctuelle — corriger SI le passage est clairement aberrant).\n'
-            "- N’injecte aucune liste fermée : aucun dictionnaire imposé, raisonnement par contexte seulement.\n"
-            "- Préserve l’aspect segmenté : même nombre de segments, mêmes champs idx dans la sortie.\n"
-            "- Préserve l’indentation spatiale Whisper quand pertinent (espaces début segment inchangés).\n\n"
-            "Sortie JSON UNIQUE : {\"revised\":[{\"idx\":NUMBER,\"text\":STRING}]} — tous les segments d’entrée. "
-            "Pour un segment irréparable ou incertain, renvoie le texte IDENTIQUE inchangé."
-        )
-    else:
-        sys_m = (
-            "You align oral Arabic lecture transcripts to clear Modern Standard Arabic (فصحى) for coursework. "
-            "Input Whisper segments are requested in Arabic script but may blend dialect forms (Darija/Maghreb, Mashreq, Hassaniya tendencies, Gulf, Egyptian/Levant mixes, codeswitching stubs).\n\n"
-            "Hard rules :\n"
-            "- Normalize dialectal morphology / common spoken particles toward formal MSA that matches educational reading while preserving factual meaning.\n"
-            "- Do NOT translate non-Arabic course glosses gratuitously unless they are stray Latin noise wrongly inserted.\n"
-            "- Do NOT invent Quranic quotations or technical claims.\n"
-            "- Keep proper nouns plausible for the discipline (subject).\n"
-            "- Same segment count — same idx set; output {\"revised\":[{\"idx\":NUMBER,\"text\":STRING}]} only.\n"
-            "- Preserve leading/trailing Whisper spacing quirks when harmless.\n"
-            "- Where uncertain between two plausible MSA synonyms, prefer the academically neutral wording."
-        )
+    lang_display = "français" if not speech_language or speech_language.lower() == "fr" else speech_language
+    sys_m = (
+        "Tu es un expert en intelligence artificielle, spécialisé en linguistique (Français, Arabe, dialecte Hassaniya) et en correction post-transcription. Ton objectif est de transformer une transcription brute contenant des erreurs en un texte fluide, parfait et 100% compréhensible, sans ajouter de balises de locuteurs.\n\n"
+        "Instructions strictes :\n"
+        f"1. Traduction Arabe & Hassaniya : Les locuteurs utilisent de l'arabe ou du dialecte Hassaniya. Tu dois traduire ces passages fluidement en {lang_display}.\n"
+        "2. Correction Contextuelle : Utilise le contexte pour corriger les erreurs phonétiques de la machine.\n"
+        "3. Son bas / Inaudible : Remplace les passages totalement incohérents par [Inaudible].\n"
+        "4. Zéro Balise de Locuteur : N'ajoute JAMAIS \"Intervenant :\" ou \"Speaker :\".\n"
+        "5. Rythme et Ponctuation : Ajoute ponctuation et majuscules naturelles.\n"
+        "6. FORMAT DE SORTIE OBLIGATOIRE : Tu dois retourner EXACTEMENT le même tableau JSON, en modifiant uniquement la valeur de \"text\". Ne supprime ni n'ajoute aucun segment. L'attribut 'idx' doit rester identique.\n\n"
+        "Renvoyer UNIQUEMENT le JSON sous la forme: {\"revised\":[{\"idx\":NUMBER,\"text\":STRING}]}"
+    )
 
-    tok_use: Optional[dict[str, int]] = None
-    try:
-        comp = client.chat.completions.create(
-            model=model,
-            temperature=0.08,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": sys_m},
-                {"role": "user", "content": payload_u},
-            ],
-        )
-    except Exception:
-        logger.warning("TRANSCRIBE: polish batch Chat failed.", exc_info=True)
-        return {}, None, approximate_prev_tail
-
-    try:
-        u = getattr(comp, "usage", None)
-        if u is not None:
-            tok_use = {
-                "prompt_tokens": int(getattr(u, "prompt_tokens", 0) or 0),
-                "completion_tokens": int(getattr(u, "completion_tokens", 0) or 0),
-                "total_tokens": int(getattr(u, "total_tokens", 0) or 0),
-            }
-    except Exception:
-        tok_use = None
-
+    max_retries = 3
     revised: dict[int, str] = {}
-    try:
-        ch0 = comp.choices[0]
-        txt = (ch0.message.content or "").strip()
-        data = json.loads(txt)
-        for row in data.get("revised") or []:
-            si = row.get("idx")
-            tt = row.get("text") or row.get("t")
-            if si is None or tt is None:
-                continue
-            revised[int(si)] = str(tt)
-    except Exception:
-        logger.warning("TRANSCRIBE: polish JSON invalide ou vide; batch ignoré.")
+    tok_use_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    
+    for attempt in range(max_retries):
+        try:
+            comp = client.chat.completions.create(
+                model=model,
+                temperature=0.08 + (attempt * 0.1),
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "revised_segments",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "revised": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "idx": {"type": "integer"},
+                                            "text": {"type": "string"}
+                                        },
+                                        "required": ["idx", "text"],
+                                        "additionalProperties": False
+                                    }
+                                }
+                            },
+                            "required": ["revised"],
+                            "additionalProperties": False
+                        },
+                        "strict": True
+                    }
+                },
+                messages=[
+                    {"role": "system", "content": sys_m},
+                    {"role": "user", "content": payload_u},
+                ],
+            )
+            
+            u = getattr(comp, "usage", None)
+            if u is not None:
+                tok_use_total["prompt_tokens"] += int(getattr(u, "prompt_tokens", 0) or 0)
+                tok_use_total["completion_tokens"] += int(getattr(u, "completion_tokens", 0) or 0)
+                tok_use_total["total_tokens"] += int(getattr(u, "total_tokens", 0) or 0)
+                
+            ch0 = comp.choices[0]
+            txt = (ch0.message.content or "").strip()
+            data = json.loads(txt)
+            
+            if not isinstance(data.get("revised"), list):
+                raise ValueError("Format JSON invalide : clé 'revised' manquante ou mal formée.")
+                
+            for row in data.get("revised") or []:
+                si = row.get("idx")
+                tt = row.get("text") or row.get("t")
+                if si is None or tt is None:
+                    continue
+                revised[int(si)] = str(tt)
+                
+            # Parsing réussi, on sort de la boucle de retry
+            break
+        except Exception as e:
+            logger.warning(f"TRANSCRIBE: polish batch JSON error (attempt {attempt+1}/{max_retries}) - {e}")
+            if attempt == max_retries - 1:
+                # Tous les essais ont échoué, on retourne vide
+                return {}, tok_use_total if tok_use_total["total_tokens"] > 0 else None, approximate_prev_tail
 
     tail = approximate_prev_tail or ""
     ordered = sorted(batch, key=lambda z: int(z["_poly_ix"]))
@@ -1414,7 +1413,7 @@ def _semantic_polish_one_batch_openai(
         ix_i = int(d["_poly_ix"])
         tail += revised.get(ix_i, str(d.get("text") or ""))
     fusion_tail = tail[-5200:] if tail else ""
-    return revised, tok_use, fusion_tail
+    return revised, tok_use_total if tok_use_total["total_tokens"] > 0 else None, fusion_tail
 
 
 def _semantic_polish_segments_openai_pipeline(
@@ -2044,6 +2043,7 @@ def _build_transcribe_success_payload(
             "hours_transcribed_for_model_before": round(lifetime_before, 6),
             "retail_mru_per_hour_applied": float(rate_applied),
             "billable_audio_hours": round(bill_audio_h, 8),
+            "transcription_engine": transcription_engine,
         },
     }
     if polish_usage_accum:
@@ -2130,16 +2130,16 @@ def _http_exc_detail_as_message(detail: Any) -> str:
     return sanitize_user_visible_transcription_detail(base)
 
 
-def _materialize_transcribe_context_from_bytes(
-    content: bytes,
-    ext: str,
+def _materialize_transcribe_context_from_file_path(
+    tmp_path: str,
     subject: str,
     speech_language_in: str,
     client_content_type_hint: Optional[str],
     transcription_engine_in: str = "openai",
+    user_credit_balance: int = 0,
 ) -> dict[str, Any]:
     """
-    Écrit le média sur disque, estime la durée, prépare les morceaux Whisper (FFmpeg possible — **bloquant**).
+    Estime la durée, prépare les morceaux Whisper (FFmpeg possible — **bloquant**).
     À exécuter dans un thread pour ne pas geler la boucle asyncio pendant les longues conversions.
     """
     _reject_disallowed_hint_content_type(client_content_type_hint)
@@ -2155,33 +2155,55 @@ def _materialize_transcribe_context_from_bytes(
     speech_language = _normalize_speech_language(speech_language_in)
     whisper_prompt = _whisper_prompt(subject, speech_language)
 
-    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-        tmp.write(content)
-        tmp_path = tmp.name
+    processed_mp3 = None
+    chunk_temp_paths: list[str] = []
 
-    estimated = _estimated_duration_seconds_from_file(tmp_path)
-    if estimated is not None:
+    try:
+        estimated = _estimated_duration_seconds_from_file(tmp_path)
+        if estimated is None:
+            estimated = _ffprobe_duration_seconds(tmp_path)
+            
+        if estimated is None or estimated <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Impossible de lire la durée du média. Fichier potentiellement corrompu ou illisible."
+            )
+
         _reject_if_duration_exceeds(estimated)
+        
+        # Blocage Préventif (Upfront Cost Check)
+        from pricing import estimate_max_transcribe_wallet_units
+        max_cost = estimate_max_transcribe_wallet_units(estimated, transcription_engine)
+        if user_credit_balance < max_cost:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Solde insuffisant. Cette transcription est estimée à {max_cost} MRU au maximum, vous n'en avez que {user_credit_balance}."
+            )
 
-    whisper_chunks, chunk_temp_paths, audio_preprocess_single = _prepare_whisper_chunks(
-        tmp_path, estimated, transcription_engine=transcription_engine
-    )
-    processed_mp3 = whisper_chunks[0][0] if len(whisper_chunks) == 1 and audio_preprocess_single else None
+        whisper_chunks, chunk_temp_paths, audio_preprocess_single = _prepare_whisper_chunks(
+            tmp_path, estimated, transcription_engine=transcription_engine
+        )
+        processed_mp3 = whisper_chunks[0][0] if len(whisper_chunks) == 1 and audio_preprocess_single else None
 
-    return {
-        "client": client,
-        "openai_aux_client": openai_aux,
-        "tmp_path": tmp_path,
-        "processed_mp3": processed_mp3,
-        "chunk_temp_paths": chunk_temp_paths,
-        "whisper_chunks": whisper_chunks,
-        "whisper_prompt": whisper_prompt,
-        "speech_language": speech_language,
-        "estimated": estimated,
-        "audio_preprocess_single_file": audio_preprocess_single,
-        "transcription_engine": transcription_engine,
-        "audio_api_model": spec.api_model,
-    }
+        return {
+            "client": client,
+            "openai_aux_client": openai_aux,
+            "tmp_path": tmp_path,
+            "processed_mp3": processed_mp3,
+            "chunk_temp_paths": chunk_temp_paths,
+            "whisper_chunks": whisper_chunks,
+            "whisper_prompt": whisper_prompt,
+            "speech_language": speech_language,
+            "estimated": estimated,
+            "audio_preprocess_single_file": audio_preprocess_single,
+            "transcription_engine": transcription_engine,
+            "audio_api_model": spec.api_model,
+        }
+    except Exception:
+        # Sécurité critique : en cas de plantage (Fichier trop long, erreur FFmpeg, etc.)
+        # on purge immédiatement les fichiers temporaires pour éviter une fuite d'espace disque.
+        _cleanup_transcription_tempfiles(tmp_path, processed_mp3, chunk_temp_paths)
+        raise
 
 
 async def _load_transcribe_context(
@@ -2189,6 +2211,7 @@ async def _load_transcribe_context(
     subject: str,
     speech_language_in: str,
     transcription_engine_in: str = "openai",
+    user_credit_balance: int = 0,
 ) -> dict[str, Any]:
     _reject_disallowed_media_type(file)
     ext = os.path.splitext(file.filename or "")[1].lower()
@@ -2201,28 +2224,48 @@ async def _load_transcribe_context(
             ),
         )
 
-    content = await file.read()
-    size_mb = len(content) / (1024 * 1024)
-    if size_mb > MAX_SIZE_MB:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Fichier trop volumineux ({size_mb:.1f} Mo). Taille maximale : {MAX_SIZE_MB} Mo "
-                "(paramètre TRANSCRIBE_MAX_MB sur le serveur)."
-            ),
+    # Spooling par chunks pour éviter le DoS RAM
+    max_bytes = MAX_SIZE_MB * 1024 * 1024
+    size_bytes = 0
+    
+    tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    tmp_path = tmp.name
+    
+    try:
+        while True:
+            chunk = await file.read(1024 * 1024)  # 1 Mo par chunk
+            if not chunk:
+                break
+            size_bytes += len(chunk)
+            if size_bytes > max_bytes:
+                tmp.close()
+                os.unlink(tmp_path)
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Fichier trop volumineux. Taille maximale : {MAX_SIZE_MB} Mo "
+                        "(paramètre TRANSCRIBE_MAX_MB sur le serveur)."
+                    ),
+                )
+            tmp.write(chunk)
+        tmp.close()
+        
+        return await asyncio.to_thread(
+            _materialize_transcribe_context_from_file_path,
+            tmp_path,
+            subject,
+            speech_language_in,
+            file.content_type,
+            transcription_engine_in,
+            user_credit_balance,
         )
-
-    return _materialize_transcribe_context_from_bytes(
-        content,
-        ext,
-        subject,
-        speech_language_in,
-        file.content_type,
-        transcription_engine_in,
-    )
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
 
 
-def _load_transcribe_context_from_path(
+async def _load_transcribe_context_from_path(
     filesystem_path: str,
     original_filename: str,
     subject: str,
@@ -2230,6 +2273,7 @@ def _load_transcribe_context_from_path(
     *,
     transcription_engine_in: str = "openai",
     hint_content_type: Optional[str] = None,
+    user_credit_balance: int = 0,
 ) -> dict[str, Any]:
     """Comme `_load_transcribe_context`, mais fichier déjà sur disque (jobs en arrière-plan)."""
     _reject_disallowed_hint_content_type(hint_content_type)
@@ -2258,41 +2302,16 @@ def _load_transcribe_context_from_path(
             ),
         )
 
-    transcription_engine = _normalize_transcription_engine(transcription_engine_in)
-    spec = get_retail_model(transcription_engine)
-
-    client: Optional[openai.OpenAI] = None
-    openai_aux: Optional[openai.OpenAI] = None
-    if spec.provider != "local":
-        client, openai_aux = _cloud_transcription_clients(spec)
-
-    speech_language = _normalize_speech_language(speech_language_in)
-    whisper_prompt = _whisper_prompt(subject, speech_language)
-    tmp_path = rp
-
-    estimated = _estimated_duration_seconds_from_file(tmp_path)
-    if estimated is not None:
-        _reject_if_duration_exceeds(estimated)
-
-    whisper_chunks, chunk_temp_paths, audio_preprocess_single = _prepare_whisper_chunks(
-        tmp_path, estimated, transcription_engine=transcription_engine
+    # Appel bloquant déplacé dans un thread pour ne pas paralyser Uvicorn
+    return await asyncio.to_thread(
+        _materialize_transcribe_context_from_file_path,
+        rp,
+        subject,
+        speech_language_in,
+        hint_content_type,
+        transcription_engine_in,
+        user_credit_balance,
     )
-    processed_mp3 = whisper_chunks[0][0] if len(whisper_chunks) == 1 and audio_preprocess_single else None
-
-    return {
-        "client": client,
-        "openai_aux_client": openai_aux,
-        "tmp_path": tmp_path,
-        "processed_mp3": processed_mp3,
-        "chunk_temp_paths": chunk_temp_paths,
-        "whisper_chunks": whisper_chunks,
-        "whisper_prompt": whisper_prompt,
-        "speech_language": speech_language,
-        "estimated": estimated,
-        "audio_preprocess_single_file": audio_preprocess_single,
-        "transcription_engine": transcription_engine,
-        "audio_api_model": spec.api_model,
-    }
 
 
 @router.post("/transcribe")
@@ -2304,7 +2323,9 @@ async def transcribe_audio(
     speech_language: str = Form(default="fr"),
     transcription_engine: str = Form(default="openai"),
 ):
-    ctx = await _load_transcribe_context(file, subject, speech_language, transcription_engine)
+    ctx = await _load_transcribe_context(
+        file, subject, speech_language, transcription_engine, _auth.credit_balance if _auth else 0
+    )
     try:
         if ctx.get("transcription_engine") == "local":
             response = _call_local_whisper_merged(
@@ -2645,7 +2666,8 @@ async def iterate_transcription_events(
     }
 
     try:
-        payload = _build_transcribe_success_payload(
+        payload = await asyncio.to_thread(
+            _build_transcribe_success_payload,
             db=db,
             _auth=_auth,
             client=ctx["client"],

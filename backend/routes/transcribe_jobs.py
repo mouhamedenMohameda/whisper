@@ -108,6 +108,15 @@ async def bootstrap_resume_transcription_jobs() -> None:
             if upd is None or (now - upd) <= timedelta(minutes=stale_min):
                 continue
             ui = tr._normalize_ui_locale(getattr(job, "ui_locale", None))
+            
+            # Rembourser la réserve avant de remettre en file d'attente pour éviter la double facturation
+            if job.user_id is not None:
+                try:
+                    u_auth = db.get(User, job.user_id)
+                    _release_job_wallet_hold(db, job, u_auth)
+                except Exception:
+                    pass
+            
             job.status = "queued"
             job.phase = "requeued"
             job.progress_percent = 1
@@ -116,6 +125,7 @@ async def bootstrap_resume_transcription_jobs() -> None:
                 "Reprise serveur — tâche remise en file d’attente.",
                 "استئناف الخادم — تمت إعادة المهمة إلى قائمة الانتظار.",
             )[:768]
+            db.add(job)
         db.commit()
 
         queued = db.scalars(
@@ -216,14 +226,19 @@ async def _execute_transcription_job_after_slot(job_public_id: str) -> None:
             db.commit()
             return
 
+        auth_user: Optional[User] = None
+        if job.user_id is not None:
+            auth_user = db.get(User, job.user_id)
+
         try:
-            ctx = tr._load_transcribe_context_from_path(
+            ctx = await tr._load_transcribe_context_from_path(
                 str(inp),
                 job.original_filename,
                 job.subject or "General",
                 job.speech_language or "fr",
                 transcription_engine_in=getattr(job, "transcription_engine", None) or "openai",
                 hint_content_type=job.client_content_type,
+                user_credit_balance=auth_user.credit_balance if auth_user else 0,
             )
         except HTTPException as e:
             job.status = "failed"
@@ -231,10 +246,6 @@ async def _execute_transcription_job_after_slot(job_public_id: str) -> None:
             job.progress_percent = 0
             db.commit()
             return
-
-        auth_user: Optional[User] = None
-        if job.user_id is not None:
-            auth_user = db.get(User, job.user_id)
 
         ctx["wallet_reserve_units"] = 0
         if (
@@ -392,25 +403,35 @@ async def create_transcription_job(
             detail=f"Extension non audio ou non supportée. Formats acceptés : {allowed}.",
         )
 
-    content = await file.read()
-    size_mb = len(content) / (1024 * 1024)
-    if size_mb > tr.MAX_SIZE_MB:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Fichier trop volumineux ({size_mb:.1f} Mo). Taille maximale : {tr.MAX_SIZE_MB} Mo "
-                "(paramètre TRANSCRIBE_MAX_MB sur le serveur)."
-            ),
-        )
-
     public_id = uuid.uuid4().hex
     jdir = _job_root(public_id)
     jdir.mkdir(parents=True, exist_ok=True)
     fname_disk = f"upload{ext or '.bin'}"
     rel = Path("jobs") / public_id / fname_disk
     abs_path = _DATA / rel
-    # Persisté avant le 202 : la file serveur peut continuer si l’utilisateur quitte la page après l’import.
-    abs_path.write_bytes(content)
+    
+    # Spooling par chunks (évite le DoS RAM)
+    max_bytes = tr.MAX_SIZE_MB * 1024 * 1024
+    size_bytes = 0
+    try:
+        with open(abs_path, "wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size_bytes += len(chunk)
+                if size_bytes > max_bytes:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Fichier trop volumineux. Taille maximale : {tr.MAX_SIZE_MB} Mo "
+                            "(paramètre TRANSCRIBE_MAX_MB sur le serveur)."
+                        ),
+                    )
+                f.write(chunk)
+    except Exception:
+        _purge_job_workspace(public_id)
+        raise
 
     uid: Optional[int] = None
     if auth_required():

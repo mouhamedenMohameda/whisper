@@ -44,20 +44,14 @@ def assert_wallet_can_use(db: Session, user: Optional[User]) -> Optional[User]:
 def debit_credits(db: Session, user: Optional[User], amount: int) -> Tuple[Optional[int], int]:
     """
     Débite après succès. Retourne (nouveau solde ou None si pas de user), montant réel débité.
+    Sécurisé avec un verrou de ligne (with_for_update) et autorise le découvert pour stopper l'API Drain.
     """
     if user is None or amount <= 0:
         return None, 0
-    u = db.get(User, user.id)
+    u = db.query(User).filter(User.id == user.id).with_for_update().first()
     if not u:
         return None, 0
-    reason = wallet_block_reason(u)
-    if reason:
-        raise HTTPException(status_code=403, detail=f"Impossible de finaliser le débit portefeuille : {reason}")
-    if u.credit_balance < amount:
-        raise HTTPException(
-            status_code=403,
-            detail="Solde MRU insuffisant pour cette action après traitement.",
-        )
+        
     u.credit_balance -= amount
     db.add(u)
     db.commit()
@@ -69,10 +63,11 @@ def credit_credits(db: Session, user: Optional[User], amount: int) -> Tuple[Opti
     """
     Crédite le portefeuille (remboursement / libération de réserve). Pas de contrôle d’expiration.
     Retourne (nouveau solde ou None), montant réellement ajouté.
+    Sécurisé avec un verrou de ligne (with_for_update).
     """
     if user is None or amount <= 0:
         return None, 0
-    u = db.get(User, user.id)
+    u = db.query(User).filter(User.id == user.id).with_for_update().first()
     if not u:
         return None, 0
     u.credit_balance += int(amount)

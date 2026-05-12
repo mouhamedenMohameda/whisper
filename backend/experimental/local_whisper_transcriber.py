@@ -26,6 +26,7 @@ def _optional_float_kw(kwargs: dict[str, Any], env_name: str, key: str) -> None:
 
 
 _lock = threading.Lock()
+_inference_lock = threading.Lock()
 _model_cached: Any = None
 _model_key: Optional[str] = None
 
@@ -165,7 +166,8 @@ def transcribe_verbose_one_chunk(audio_path: str, speech_language: str, initial_
         call_kw = dict(kwargs)
         if extra:
             call_kw.update(extra)
-        return model.transcribe(audio, **call_kw)
+        with _inference_lock:
+            return model.transcribe(audio, **call_kw)
 
     try:
         result = _run()

@@ -122,3 +122,80 @@ Do not invent facts not supported by the transcript; you may note uncertainty ex
         "completion_tokens": ct,
         "transcript_truncated": truncated,
     }
+
+
+def groq_clean_transcript_segments(
+    segments: list[dict[str, Any]],
+    speech_language: str,
+) -> tuple[list[dict[str, Any]], int, int]:
+    """
+    Applique le "Prompt Maître" pour corriger le texte des segments (erreurs phonétiques, dialectes)
+    tout en conservant la structure JSON (passage_index) pour maintenir les scores de fiabilité.
+    """
+    key = (os.getenv("GROQ_API_KEY") or "").strip()
+    if not key or not segments:
+        return segments, 0, 0
+
+    try:
+        from groq import APIError, Groq
+        from course_from_transcript import _groq_chat
+    except ImportError:
+        return segments, 0, 0
+
+    model = (os.getenv("GROQ_INSIGHT_MODEL") or "").strip() or _GROQ_MODEL_DEFAULT
+    base = (os.getenv("GROQ_BASE_URL") or "").strip().rstrip("/")
+    client = Groq(api_key=key, base_url=base) if base else Groq(api_key=key)
+
+    lang_display = "français" if not speech_language or speech_language.lower() == "fr" else speech_language
+    
+    system = f"""Tu es un expert en intelligence artificielle, spécialisé en linguistique (Français, Arabe, dialecte Hassaniya) et en correction post-transcription. Ton objectif est de transformer une transcription brute contenant des erreurs en un texte fluide, parfait et 100% compréhensible, sans ajouter de balises de locuteurs.
+
+Instructions strictes :
+1. Traduction Arabe & Hassaniya : Les locuteurs utilisent de l'arabe ou du dialecte Hassaniya. Tu dois traduire ces passages fluidement en {lang_display}.
+2. Correction Contextuelle : Utilise le contexte pour corriger les erreurs phonétiques de la machine.
+3. Son bas / Inaudible : Remplace les passages totalement incohérents par [Inaudible].
+4. Zéro Balise de Locuteur : N'ajoute JAMAIS "Intervenant :" ou "Speaker :".
+5. Rythme et Ponctuation : Ajoute ponctuation et majuscules naturelles.
+6. FORMAT DE SORTIE OBLIGATOIRE : Tu dois retourner EXACTEMENT le même tableau JSON sous la clé "segments", en modifiant uniquement la valeur de "text". Ne supprime ni n'ajoute aucun segment. L'attribut 'id' doit rester identique.
+
+Renvoyer UNIQUEMENT le JSON sous la forme: {{"segments": [{{"id": 0, "text": "..."}}, ...]}}"""
+
+    batch_size = 40
+    total_pt = 0
+    total_ct = 0
+    
+    out_segments = [dict(s) for s in segments]
+    
+    for i in range(0, len(segments), batch_size):
+        batch = segments[i:i+batch_size]
+        mini_batch = [{"id": s.get("passage_index", j), "text": s.get("text", "")} for j, s in enumerate(batch)]
+        user = "Voici le tableau JSON des segments à corriger :\n" + json.dumps(mini_batch, ensure_ascii=False)
+        
+        try:
+            raw_text, pt, ct = _groq_chat(
+                client,
+                model=model,
+                system=system,
+                user=user,
+                max_tokens=8192,
+                temperature=0.1,
+                extra_create_kwargs={"response_format": {"type": "json_object"}}
+            )
+            total_pt += pt
+            total_ct += ct
+            
+            parsed = _parse_json_object(raw_text)
+            if parsed and "segments" in parsed and isinstance(parsed["segments"], list):
+                corrected_dict = {str(item.get("id", "")): item.get("text", "") for item in parsed["segments"] if isinstance(item, dict)}
+                
+                for s_in in batch:
+                    pid = str(s_in.get("passage_index", ""))
+                    if pid in corrected_dict:
+                        for o_s in out_segments:
+                            if str(o_s.get("passage_index", "")) == pid:
+                                o_s["text"] = corrected_dict[pid]
+                                break
+        except Exception as e:
+            logger.warning(f"groq_clean_transcript_segments: erreur sur le batch {{i}}: {{e}}")
+            
+    return out_segments, total_pt, total_ct

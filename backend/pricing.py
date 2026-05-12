@@ -235,3 +235,38 @@ def claude_billed(input_tokens: int, output_tokens: int) -> tuple[float, float]:
 def export_job_billed() -> tuple[float, float]:
     u = EXPORT_JOB_PROVIDER_USD
     return float(u), usd_provider_to_billed_mru(u)
+
+
+def estimate_max_transcribe_wallet_units(duration_seconds: float, transcription_engine: str = "openai") -> int:
+    """
+    Estime le coût total maximum d'une transcription (Audio + LLM) pour le blocage préventif.
+    """
+    if duration_seconds <= 0:
+        return 0
+        
+    # 1. Coût Audio
+    if "local" in (transcription_engine or "").lower():
+        audio_usd = local_whisper_provider_usd(duration_seconds)
+    else:
+        audio_usd = whisper_provider_usd(duration_seconds)
+        
+    mru_audio = billed_mru_to_wallet_units_debit(usd_provider_to_billed_mru(audio_usd))
+    
+    # 2. Coût LLM (Nettoyage Sémantique + Résumé)
+    # On estime environ 250 tokens in/out par minute d'audio.
+    minutes = duration_seconds / 60.0
+    estimated_tokens = int(minutes * 250)
+    
+    llm_usd = openai_transcribe_chat_provider_usd(estimated_tokens, estimated_tokens)
+    
+    # Résumé profond (sujet/chapitres) : environ 1000 tokens par heure
+    summary_tokens = max(500, int((duration_seconds / 3600.0) * 1000))
+    llm_usd += groq_chat_provider_usd(summary_tokens, summary_tokens // 2)
+    
+    mru_llm = billed_mru_to_wallet_units_debit(transcribe_aggregate_billed_mru(llm_usd))
+    
+    # 3. Marge de sécurité (+10%)
+    total_mru = mru_audio + mru_llm
+    safe_total = int(total_mru * 1.10)
+    
+    return max(1, safe_total)

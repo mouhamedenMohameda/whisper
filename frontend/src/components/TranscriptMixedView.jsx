@@ -61,10 +61,25 @@ export default function TranscriptMixedView({ view, emptyHint = "Pas de données
               : undefined;
         const mergedTip = [tip, relTip].filter(Boolean).join("\n\n") || undefined;
         const text = translated ? String(b?.display ?? b?.original ?? "") : String(b?.display ?? b?.original ?? "");
-        const clsForeignRed = translated ? "font-bold text-red-600 dark:text-red-400" : "";
-        const clsReliableAccent = !translated && highRel ? "font-semibold text-amber-700 dark:text-amber-300" : "";
+        const isHighConfidence = scoreN != null ? scoreN >= 95 : highRel;
+        
+        let clsColor = "text-slate-900 dark:text-slate-100";
+        
+        if (isHighConfidence) {
+           // Sans diarisation, on applique une couleur unique (par exemple l'ambre/or ou le bleu) pour la haute confiance
+           clsColor = "font-medium text-blue-600 dark:text-blue-400"; 
+        } else if (!isHighConfidence) {
+           // Basse confiance : on laisse en noir
+           clsColor = "text-black font-medium underline decoration-dashed decoration-slate-400/70 dark:text-white cursor-help";
+        }
+        
+        // Surcharge si c'est une traduction pure
+        if (translated && !isHighConfidence) {
+           clsColor = "font-bold text-red-600 dark:text-red-400";
+        }
+
         return (
-          <span key={`tx-${idx}`} title={mergedTip} className={`${clsForeignRed} ${clsReliableAccent}`.trim()}>
+          <span key={`tx-${idx}`} title={mergedTip} className={clsColor}>
             {text}
           </span>
         );
