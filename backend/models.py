@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, false, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, false, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -45,6 +45,20 @@ class User(Base):
     )
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false(), default=False)
 
+    hours_transcribed_lifetime: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        server_default="0",
+        default=0.0,
+        comment="Somme des heures par modèle (dénormalisé ; paliers = user_transcription_model_hours).",
+    )
+
+    transcription_model_hours: Mapped[list["UserTranscriptionModelHours"]] = relationship(
+        "UserTranscriptionModelHours",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
     topup_requests: Mapped[list["CreditTopUpRequest"]] = relationship(
         "CreditTopUpRequest", back_populates="user", cascade="all, delete-orphan"
     )
@@ -64,6 +78,54 @@ class CreditTopUpRequest(Base):
     admin_note: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
     user: Mapped["User"] = relationship("User", back_populates="topup_requests")
+
+
+class UserTranscriptionModelHours(Base):
+    """Heures cumulées par utilisateur et par id de modèle (palier fidélité indépendant par moteur)."""
+
+    __tablename__ = "user_transcription_model_hours"
+    __table_args__ = (UniqueConstraint("user_id", "model_id", name="uq_user_transcription_model_hours_user_model"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    model_id: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    hours_cumulative: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        server_default="0",
+        default=0.0,
+    )
+
+    user: Mapped["User"] = relationship("User", back_populates="transcription_model_hours")
+
+
+class UserNotification(Base):
+    """Notification adressée à un utilisateur (recharge validée, don admin, etc.).
+
+    ``kind`` :
+      - ``topup_approved`` : demande de recharge validée par l’admin
+      - ``admin_grant``    : crédit ajouté manuellement par un admin (don gratuit)
+    """
+
+    __tablename__ = "user_notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    topup_request_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("credit_top_up_requests.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    credits_granted: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    mru_credited: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    admin_note: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class TranscriptionJob(Base):
@@ -95,6 +157,8 @@ class TranscriptionJob(Base):
     error_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Réserve portefeuille (unités wallet) débitée au passage « queued → processing » si TRANSCRIBE_JOB_WALLET_HOLD ; libérée ou soldée au résultat.
     wallet_reserved_units: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
+    # Heures (fractionnaires) déjà comptabilisées sur ``user_transcription_model_hours`` pour ce job ; NULL = pas encore appliqué.
+    lifetime_hours_applied: Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

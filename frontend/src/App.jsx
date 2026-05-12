@@ -37,6 +37,7 @@ const AdminTopUpsPage = lazy(() => import("./components/AdminTopUpsPage.jsx"));
 const ChatPage = lazy(() => import("./components/ChatPage.jsx"));
 const CreditsPage = lazy(() => import("./components/CreditsPage.jsx"));
 const LessonViewer = lazy(() => import("./components/LessonViewer.jsx"));
+const NotificationsPage = lazy(() => import("./components/NotificationsPage.jsx"));
 const TranscriptionHistoryPage = lazy(() => import("./components/TranscriptionHistoryPage.jsx"));
 
 function RouteLazyFallback() {
@@ -64,7 +65,17 @@ const INITIAL_SESSION_USAGE = {
 
 /** @param {string} ph @param {(key: string, opts?: object) => string} t */
 function phaseBadgeLabels(ph, t) {
-  const keys = ["upload", "transcribing", "editing", "generating", "lesson", "history", "credits", "chat"];
+  const keys = [
+    "upload",
+    "transcribing",
+    "editing",
+    "generating",
+    "lesson",
+    "history",
+    "credits",
+    "chat",
+    "notifications",
+  ];
   if (keys.includes(ph)) {
     return { short: t(`phases.${ph}.short`), full: t(`phases.${ph}.full`) };
   }
@@ -168,9 +179,9 @@ function historyEntryFromTranscribePayload(data, { filenames, subject, speechLan
     groqInsightApplied: Boolean(data.groq_insight_applied),
     groqTranscriptTruncated: Boolean(data.groq_transcript_truncated),
     transcriptionEngine:
-      typeof data.transcription_engine === "string" && data.transcription_engine.trim().toLowerCase() === "local"
-        ? "local"
-        : "openai",
+      typeof data.transcription_engine === "string" && data.transcription_engine.trim()
+        ? data.transcription_engine.trim().toLowerCase()
+        : "whisper-1",
     asrPassagesAnnotated,
     transcriptionJobPublicIds: jobIds,
   };
@@ -685,11 +696,43 @@ export default function App() {
     void reloadCreditHud();
   }, [reloadCreditHud]);
 
+  const [notifUnread, setNotifUnread] = useState(0);
+  const reloadNotifUnread = useCallback(async () => {
+    if (!authGate.ready || authGate.skipped) {
+      setNotifUnread(0);
+      return;
+    }
+    if (profileFlags.is_admin) {
+      setNotifUnread(0);
+      return;
+    }
+    try {
+      const res = await fetch(apiUrl("/api/notifications/unread-count"), {
+        headers: getAuthHeaders(false),
+      });
+      const p = await parseJsonResponse(res);
+      if (!p.ok) {
+        setNotifUnread(0);
+        return;
+      }
+      setNotifUnread(Math.max(0, Number(p.data?.unread || 0)));
+    } catch {
+      setNotifUnread(0);
+    }
+  }, [authGate.ready, authGate.skipped, profileFlags.is_admin]);
+
+  useEffect(() => {
+    void reloadNotifUnread();
+    if (!authGate.ready || authGate.skipped || profileFlags.is_admin) return undefined;
+    const iv = setInterval(() => void reloadNotifUnread(), 30000);
+    return () => clearInterval(iv);
+  }, [reloadNotifUnread, authGate.ready, authGate.skipped, profileFlags.is_admin]);
+
   const [phase, setPhase] = useState("upload");
   const [files, setFiles] = useState([]);
   const [subject, setSubject] = useState("");
   const [speechLanguage, setSpeechLanguage] = useState("fr");
-  const [transcriptionEngine, setTranscriptionEngine] = useState(() => /** @type {"openai"|"local"} */ ("openai"));
+  const [transcriptionEngine, setTranscriptionEngine] = useState(() => "whisper-1");
   const [transcript, setTranscript] = useState("");
   const [transcriptMixedView, setTranscriptMixedView] = useState(null);
   /** Passages ASR + scores (réponse transcription) — obligatoire pour /generate avec collage JSON. */
@@ -866,7 +909,11 @@ export default function App() {
     setTranscript(entry.transcript || "");
     setSubject(entry.subject || "");
     setSpeechLanguage(entry.speechLanguage === "ar" ? "ar" : "fr");
-    setTranscriptionEngine(entry.transcriptionEngine === "local" ? "local" : "openai");
+    setTranscriptionEngine(
+      typeof entry.transcriptionEngine === "string" && entry.transcriptionEngine.trim()
+        ? entry.transcriptionEngine.trim().toLowerCase()
+        : "whisper-1",
+    );
     setLanguage(entry.language || "");
     setWordCount(entry.wordCount || 0);
     setDurationMinutes(entry.durationMinutes ?? 0);
@@ -1813,6 +1860,30 @@ export default function App() {
                   <span>{creditHud != null ? ` · ${creditHud.balance}` : ""}</span>
                 </button>
               ) : null}
+              {!authGate.skipped ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setPhase("notifications");
+                    void reloadNotifUnread();
+                  }}
+                  title={t("app.notificationsTitle")}
+                  aria-label={
+                    notifUnread > 0
+                      ? t("app.notificationsAriaUnread", { count: notifUnread })
+                      : t("app.notificationsAriaEmpty")
+                  }
+                  className="relative inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200/90 bg-white/75 px-3 py-2.5 text-[11px] font-bold text-slate-800 shadow-sm backdrop-blur-md transition hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-600 dark:bg-slate-900/80 dark:text-slate-100 dark:hover:bg-slate-800 sm:py-2 sm:px-3"
+                >
+                  <span aria-hidden className="text-base leading-none">🔔</span>
+                  {notifUnread > 0 ? (
+                    <span className="absolute -end-1 -top-1 inline-flex min-h-[1.1rem] min-w-[1.1rem] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white shadow-sm ring-2 ring-white motion-safe:animate-pulse dark:ring-slate-900">
+                      {notifUnread > 99 ? "99+" : notifUnread}
+                    </span>
+                  ) : null}
+                </button>
+              ) : null}
               <button
                 type="button"
                 disabled={busy}
@@ -1892,6 +1963,15 @@ export default function App() {
         {phase === "credits" && (
           <Suspense fallback={<RouteLazyFallback />}>
             <CreditsPage onBack={() => setPhase("upload")} onWalletUpdated={reloadCreditHud} />
+          </Suspense>
+        )}
+
+        {phase === "notifications" && (
+          <Suspense fallback={<RouteLazyFallback />}>
+            <NotificationsPage
+              onBack={() => setPhase("upload")}
+              onUnreadChange={(n) => setNotifUnread(Math.max(0, Number(n) || 0))}
+            />
           </Suspense>
         )}
 

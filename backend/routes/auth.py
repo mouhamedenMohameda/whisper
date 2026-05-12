@@ -21,6 +21,23 @@ from security import create_access_token, hash_password, verify_password
 
 router = APIRouter(tags=["auth"])
 
+# Comptes perdus lors d’une perte de base : message de connexion explicite si l’e-mail n’existe plus en base.
+_LEGACY_REREGISTER_LOGIN_HINT_EMAILS = frozenset(
+    {
+        "babouhloume@gmail.com",
+        "lemanetlamid54@gmail.com",
+        "ahmedlmg2021@gmail.com",
+        "meyababach@gmail.com",
+        "mohameda.mouhameden@gmail.com",
+        "dweihedaddah51@gmail.com",
+        "ghourra.beddou@gmail.com",
+    },
+)
+
+_LEGACY_REREGISTER_LOGIN_HINT_DETAIL = (
+    "Aucun compte avec cette adresse. Passe d’abord par l’onglet « Créer un compte » (même e-mail), puis « Connexion »."
+)
+
 
 def _mask_nni(nni: str) -> str:
     if len(nni) <= 4:
@@ -138,8 +155,16 @@ def login(body: LoginBody, db: Session = Depends(get_db)):
         )
     email = body.email.strip().lower()
     user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
-    if not user or not verify_password(body.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="E-mail ou mot de passe incorrect.")
+    if user and verify_password(body.password, user.password_hash):
+        token = create_access_token(user.id, user.email)
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "user": _user_payload(user),
+        }
+    if user is None and email in _LEGACY_REREGISTER_LOGIN_HINT_EMAILS:
+        raise HTTPException(status_code=401, detail=_LEGACY_REREGISTER_LOGIN_HINT_DETAIL)
+    raise HTTPException(status_code=401, detail="E-mail ou mot de passe incorrect.")
     token = create_access_token(user.id, user.email)
     return {
         "access_token": token,

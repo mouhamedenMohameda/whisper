@@ -65,6 +65,10 @@
       "short": "Chat",
       "full": "Assistant"
     },
+    "notifications": {
+      "short": "Notif.",
+      "full": "Notifications"
+    },
     "default": {
       "short": "Étape",
       "full": "{{phase}}"
@@ -190,6 +194,12 @@
     "engineGroupAria": "Moteur de transcription",
     "engineHint":
       "{{cloud}} : mode hébergé habituel. {{desk}} : mode atelier sur ton déploiement (expérimental — à activer côté installation). Chaque utilisation est facturée selon ta configuration.",
+    "loyaltyTier_nouveau": "Nouveau",
+    "loyaltyTier_regular": "Régulier",
+    "loyaltyTier_loyal": "Fidèle",
+    "enginePriceTierPerModel":
+      "Chaque option affiche son tarif MRU/h selon les heures cumulées uniquement avec ce moteur (compteur séparé par modèle).",
+    "engineModelHoursShort": "{{h}} h cumul sur ce moteur",
     "subject": "Matière / thème du cours",
     "subjectBadge": "optionnel précis recommandé",
     "subjectPh": "Biologie cellulaire, Droit constitutionnel, Algèbre linéaire…",
@@ -262,6 +272,10 @@
     "adminFooter": "Connexion réservée aux comptes utilisateur sur un autre navigateur ou appareil pour transcrire ou générer des cours.",
     "footer": "Conçu pour de longues séances de révision — interface pensée tactile et clavier, sur tous les écrans.",
     "walletTitle": "Solde MRU — portefeuille et recharge",
+    "notificationsTitle": "Notifications de recharge et de crédits offerts",
+    "notificationsAriaUnread_one": "Notifications — {{count}} non lue",
+    "notificationsAriaUnread_other": "Notifications — {{count}} non lues",
+    "notificationsAriaEmpty": "Notifications — tout est lu",
     "historyBtn": "Historique",
     "chatBtn": "Chat",
     "newImport": "← Nouvel import",
@@ -303,6 +317,25 @@
     "insightReadyToast": "Analyse prête.",
     "insightFail": "L’analyse n’a pas abouti. Réessaie plus tard.",
     "insightTooShort": "Texte trop court pour l’analyse (environ 80 caractères minimum)."
+  },
+  "notifications": {
+    "title": "Notifications",
+    "intro": "Retrouve ici l’historique de tes recharges validées par un administrateur et des crédits offerts gratuitement par l’équipe.",
+    "loading": "Chargement des notifications…",
+    "empty": "Aucune notification pour l’instant.",
+    "allRead": "Toutes les notifications sont lues.",
+    "unreadCount_one": "{{count}} non lue",
+    "unreadCount_other": "{{count}} non lues",
+    "newBadge": "Nouveau",
+    "markOne": "Marquer comme lue",
+    "markAll": "Tout marquer comme lu",
+    "markAllOk": "Notifications marquées comme lues.",
+    "markFail": "Impossible de mettre à jour la notification.",
+    "loadError": "Impossible de charger les notifications.",
+    "topupApprovedTitle": "Demande de recharge validée",
+    "topupApprovedBody": "Ta demande de recharge #{{id}} a été acceptée par l’administrateur : ~{{mru}} MRU ajoutés à ton portefeuille.",
+    "adminGrantTitle": "Crédits offerts par l’équipe",
+    "adminGrantBody": "L’administrateur t’a offert ~{{mru}} MRU sur ton portefeuille — bonne utilisation !"
   },
   "chat": {
     "title": "Assistant",

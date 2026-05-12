@@ -193,7 +193,8 @@ export function transcribeWithXHR(file, subject, speechLanguage, handlers) {
     handlers && typeof handlers === "object" && typeof handlers.transcriptionEngine === "string"
       ? handlers.transcriptionEngine
       : "openai";
-  const transcription_engine = engineRaw.trim().toLowerCase() === "local" ? "local" : "openai";
+  const raw = (engineRaw || "openai").trim().toLowerCase();
+  const transcription_engine = raw.length > 0 ? raw : "openai";
 
   /** @type {TranscribeProgressHandlers} */
   let h = {};
@@ -391,7 +392,8 @@ export function enqueueTranscribeJobWithXHR(file, subject, speechLanguage, handl
   const lang = speechLanguage === "ar" ? "ar" : "fr";
   /** @type {string} */
   const engineRaw = typeof handlers.transcriptionEngine === "string" ? handlers.transcriptionEngine : "openai";
-  const transcription_engine = engineRaw.trim().toLowerCase() === "local" ? "local" : "openai";
+  const raw = (engineRaw || "openai").trim().toLowerCase();
+  const transcription_engine = raw.length > 0 ? raw : "openai";
   /** @type {TranscribeProgressHandlers} */
   let h = {};
   const legacyCombined = typeof handlers === "function" ? /** @type {(n: number) => void} */ (handlers) : null;

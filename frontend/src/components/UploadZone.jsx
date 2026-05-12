@@ -6,6 +6,7 @@ import {
   ENGINE_TRANSCRIBE_CLOUD,
   ENGINE_TRANSCRIPTION,
 } from "../branding.js";
+import { apiUrl, getAuthHeaders } from "../utils/api.js";
 
 /** Extensions audio uniquement (pas vidéo PDF image). */
 const AUDIO_EXTENSIONS = new Set([
@@ -112,6 +113,12 @@ function useEstimatedDurations(files) {
   return map;
 }
 
+/** Liste minimale si l’API catalogue est indisponible. */
+const FALLBACK_TRANSCRIPTION_MODELS = [
+  { id: "whisper-1", label_fr: "Excellence audio", label_ar: "جودة فائقة", provider: "openai" },
+  { id: "local", label_fr: "Atelier privé (économique)", label_ar: "ورشة خاصة (اقتصادي)", provider: "local" },
+];
+
 function UploadZone({
   files,
   onFilesChange,
@@ -119,7 +126,7 @@ function UploadZone({
   onSubjectChange,
   speechLanguage = "fr",
   onSpeechLanguageChange,
-  transcriptionEngine = "openai",
+  transcriptionEngine = "whisper-1",
   onTranscriptionEngineChange,
   onSubmit,
   disabled,
@@ -128,7 +135,28 @@ function UploadZone({
   const { t } = useTranslation();
   const durations = useEstimatedDurations(files);
   const [drag, setDrag] = useState(false);
+  const [retailCatalog, setRetailCatalog] = useState(null);
   const dash = t("common.dash");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(apiUrl("/api/credits/transcription-retail"), {
+          headers: getAuthHeaders(false),
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (cancelled || !Array.isArray(data.models)) return;
+        setRetailCatalog(data);
+      } catch {
+        /* fallback FALLBACK_TRANSCRIPTION_MODELS */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (files.length === 0 || disabled) return;
@@ -426,14 +454,27 @@ function UploadZone({
           <p className="text-[11px] leading-snug text-slate-500 dark:text-slate-400">
             {t("upload.engineHint", { cloud: ENGINE_TRANSCRIBE_CLOUD, desk: ENGINE_TRANSCRIBE_ATELIER })}
           </p>
+          {retailCatalog?.you && (
+            <p className="text-[11px] leading-snug text-brand-900/85 dark:text-brand-100/85">
+              {t("upload.enginePriceTierPerModel")}
+            </p>
+          )}
           <div className="grid grid-cols-1 gap-2 xs:grid-cols-2" role="group" aria-label={t("upload.engineGroupAria")}>
-            {[
-              { id: "openai", label: ENGINE_TRANSCRIBE_CLOUD },
-              { id: "local", label: ENGINE_TRANSCRIBE_ATELIER },
-            ].map((opt) => (
+            {(retailCatalog?.models ?? FALLBACK_TRANSCRIPTION_MODELS).map((opt) => {
+              const label =
+                speechLanguage === "ar" && opt.label_ar ? opt.label_ar : opt.label_fr || opt.id;
+              const px = retailCatalog?.you?.mru_per_hour_by_model_id?.[opt.id];
+              const priceHint =
+                typeof px === "number" && Number.isFinite(px) ? ` · ${px} MRU/h` : "";
+              const hm = retailCatalog?.you?.hours_lifetime_by_model_id?.[opt.id];
+              const hoursHint =
+                retailCatalog?.you && typeof hm === "number"
+                  ? t("upload.engineModelHoursShort", { h: Number(hm.toFixed(2)) })
+                  : "";
+              return (
               <label
                 key={opt.id}
-                className={`flex min-h-[2.75rem] min-w-0 cursor-pointer items-center justify-center gap-2 rounded-2xl border px-3 py-2.5 text-center text-[11px] font-bold leading-snug transition xs:px-4 sm:min-h-0 sm:justify-start sm:text-left sm:text-sm ${
+                className={`flex min-h-[3rem] min-w-0 cursor-pointer items-start justify-center gap-2 rounded-2xl border px-3 py-2.5 text-start text-[11px] font-bold leading-snug transition xs:px-4 sm:min-h-0 sm:justify-start sm:text-sm ${
                   transcriptionEngine === opt.id
                     ? "border-brand-500 bg-brand-500/10 text-brand-900 shadow-inner dark:border-brand-400 dark:bg-brand-950/45 dark:text-brand-100"
                     : "border-slate-200/90 bg-white/70 text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-950/60 dark:text-slate-200"
@@ -447,13 +488,24 @@ function UploadZone({
                   disabled={disabled}
                   onChange={() =>
                     typeof onTranscriptionEngineChange === "function" &&
-                    onTranscriptionEngineChange(/** @type {"openai"|"local"} */ (opt.id))
+                    onTranscriptionEngineChange(opt.id)
                   }
                   value={opt.id}
                 />
-                <span className="break-words">{opt.label}</span>
+                <span className="min-w-0 flex flex-col gap-0.5 break-words">
+                  <span className="leading-snug">
+                    {label}
+                    {priceHint}
+                  </span>
+                  {hoursHint ? (
+                    <span className="text-[9px] font-medium leading-tight text-slate-500 dark:text-slate-400 sm:text-[10px]">
+                      {hoursHint}
+                    </span>
+                  ) : null}
+                </span>
               </label>
-            ))}
+            );
+            })}
           </div>
         </fieldset>
 

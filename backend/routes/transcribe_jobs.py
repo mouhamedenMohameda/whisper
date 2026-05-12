@@ -22,6 +22,7 @@ from database import SessionLocal, get_db
 from deps import auth_required, require_wallet_user
 from models import TranscriptionJob, User
 from routes import transcribe as tr
+from transcription_retail_catalog import get_retail_model
 
 logger = logging.getLogger(__name__)
 
@@ -264,6 +265,8 @@ async def _execute_transcription_job_after_slot(job_public_id: str) -> None:
         last_save_mono = time.monotonic()
         last_announced_pct = -1
 
+        ctx["transcription_job_id"] = job.id
+
         async for ev in tr.iterate_transcription_events(
             ctx=ctx,
             db=db,
@@ -368,10 +371,18 @@ async def create_transcription_job(
     tr._reject_disallowed_media_type(file)
 
     engine_norm = tr._normalize_transcription_engine(transcription_engine)
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    if engine_norm != "local" and not api_key:
-        raise HTTPException(status_code=500, detail="La clé technique de transcription est manquante sur le serveur.")
+    spec = get_retail_model(engine_norm)
+    if spec.provider != "local":
+        if spec.provider == "openai" and not (os.getenv("OPENAI_API_KEY") or "").strip():
+            raise HTTPException(
+                status_code=500,
+                detail="La clé technique de transcription (OpenAI) est manquante sur le serveur.",
+            )
+        if spec.provider == "groq" and not (os.getenv("GROQ_API_KEY") or "").strip():
+            raise HTTPException(
+                status_code=500,
+                detail="La clé Groq (GROQ_API_KEY) est manquante sur le serveur pour ce modèle.",
+            )
 
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in tr.ALLOWED_EXTENSIONS:

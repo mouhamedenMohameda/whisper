@@ -65,6 +65,10 @@
       "short": "دردشة",
       "full": "المساعد"
     },
+    "notifications": {
+      "short": "إشعار",
+      "full": "الإشعارات"
+    },
     "default": {
       "short": "مرحلة",
       "full": "{{phase}}"
@@ -190,6 +194,12 @@
     "engineGroupAria": "محرك النسخ من الصوت",
     "engineHint":
       "{{cloud}}: الوضع المستضاف الاعتيادي. {{desk}}: وضع الورشة على نشرك (تجريبي — يُفعَّل من الإعداد). كل استخدام يُخصم من الرصيد حسب التكوين.",
+    "loyaltyTier_nouveau": "جديد",
+    "loyaltyTier_regular": "منتظم",
+    "loyaltyTier_loyal": "مخلص",
+    "enginePriceTierPerModel":
+      "كل خيار يعرض سعر MRU/س حسب الساعات المتراكمة مع هذا المحرك فقط (عداد منفصل لكل نموذج).",
+    "engineModelHoursShort": "{{h}} س تراكم على هذا المحرك",
     "subject": "المادة / موضوع الدرس",
     "subjectBadge": "يُستحسن الدقة",
     "subjectPh": "أحياء، قانون، جبر…",
@@ -262,6 +272,14 @@
     "adminFooter": "استخدم حساباً مستخدماً على متصفح آخر لنسخ المحاضرات أو توليد الدروس.",
     "footer": "مُعدّ للجلسات الطويلة — واجهة للمس وللوحة المفاتيح ولجميع الشاشات.",
     "walletTitle": "رصيد MRU — المحفظة والتعبئة",
+    "notificationsTitle": "إشعارات تعبئة الرصيد والكريديت المهدى",
+    "notificationsAriaUnread_zero": "الإشعارات — لا إشعارات غير مقروءة",
+    "notificationsAriaUnread_one": "الإشعارات — إشعار واحد غير مقروء",
+    "notificationsAriaUnread_two": "الإشعارات — إشعاران غير مقروءَين",
+    "notificationsAriaUnread_few": "الإشعارات — {{count}} إشعارات غير مقروءة",
+    "notificationsAriaUnread_many": "الإشعارات — {{count}} إشعاراً غير مقروء",
+    "notificationsAriaUnread_other": "الإشعارات — {{count}} إشعار غير مقروء",
+    "notificationsAriaEmpty": "الإشعارات — كل شيء مقروء",
     "historyBtn": "السجل",
     "chatBtn": "الدردشة",
     "newImport": "← استيراد جديد",
@@ -303,6 +321,29 @@
     "insightReadyToast": "التحليل جاهز.",
     "insightFail": "فشل التحليل. أعد المحاولة لاحقاً.",
     "insightTooShort": "النص قصير جداً للتحليل (حوالي 80 حرفاً كحد أدنى)."
+  },
+  "notifications": {
+    "title": "الإشعارات",
+    "intro": "تجد هنا سجل طلبات تعبئة الرصيد التي وافق عليها المشرف، والكريديت المُهدى مجاناً من فريق العمل.",
+    "loading": "جاري تحميل الإشعارات…",
+    "empty": "لا توجد إشعارات بعد.",
+    "allRead": "تمت قراءة جميع الإشعارات.",
+    "unreadCount_zero": "لا إشعار غير مقروء",
+    "unreadCount_one": "إشعار واحد غير مقروء",
+    "unreadCount_two": "إشعاران غير مقروءَين",
+    "unreadCount_few": "{{count}} إشعارات غير مقروءة",
+    "unreadCount_many": "{{count}} إشعاراً غير مقروء",
+    "unreadCount_other": "{{count}} إشعار غير مقروء",
+    "newBadge": "جديد",
+    "markOne": "وَسم كمقروء",
+    "markAll": "وَسم الكل كمقروء",
+    "markAllOk": "تم وسم الإشعارات كمقروءة.",
+    "markFail": "تعذّر تحديث الإشعار.",
+    "loadError": "تعذّر تحميل الإشعارات.",
+    "topupApprovedTitle": "تمت الموافقة على طلب التعبئة",
+    "topupApprovedBody": "وافق المشرف على طلب تعبئتك رقم #{{id}}: أُضيف نحو {{mru}} MRU إلى محفظتك.",
+    "adminGrantTitle": "هدية رصيد من الفريق",
+    "adminGrantBody": "أهداك المشرف نحو {{mru}} MRU في محفظتك — استمتع باستخدامه!"
   },
   "chat": {
     "title": "المساعد",

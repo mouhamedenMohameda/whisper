@@ -65,6 +65,21 @@ Dans l’app web connectée en admin, le bouton **« Valid. recharges »** o
   - Start: `python -m uvicorn main:app --host 0.0.0.0 --port $PORT` (Render exposes `PORT`; Railway injects similarly)  
   - Environment: `OPENAI_API_KEY`, `GROQ_API_KEY` (génération de cours `/api/generate` + analyse transcript), `JWT_SECRET`, `ADMIN_EMAIL` (compte unique pour `/api/admin/*`), `AUTH_REQUIRED=true`, volume persistant pour `backend/data` (captures + SQLite), ou `DATABASE_URL` PostgreSQL, `ALLOWED_ORIGINS=https://your-vercel-domain.app`  
 
+### Backend (VPS + SQLite) — comptes qui « disparaissent » à chaque déploiement
+
+L’application **ne supprime pas** la table `users` au redémarrage. Si tout le monde est déconnecté après un déploiement, c’est en général que **le fichier `lecturai.db` (ou tout `backend/data/`) a été remplacé** par une copie vide ou neuve.
+
+Causes typiques : **rsync/scp** avec `--delete` qui recopie un `backend/` sans ta base de prod ; **suppression** du dossier `/var/www/...` puis re-clone ; **Docker** sans volume sur `data/` ; **CI** qui publie un artefact « propre » par-dessus la prod.
+
+**Correctifs possibles** (choisir au moins une ligne de conduite) :
+
+1. **Ne pas écraser les données au déploiement** — synchroniser seulement le code (ex. `backend/*.py`, `routes/`, etc.) ou **exclure** explicitement `data/` / `lecturai.db` des rsync ; éviter `git clean -fdx` sur le serveur dans le dossier d’install.
+2. **Sortir la base du répertoire déployé** — sur le serveur, dans `.env` :  
+   `DATABASE_URL=sqlite:////var/lib/lecturai/lecturai.db`  
+   (créer le répertoire, droits d’écriture pour l’utilisateur PM2), puis une seule fois copier l’ancienne base si besoin. Les prochains déploiements du code ne toucheront plus ce fichier.
+3. **Sauvegardes automatiques** — `backend/scripts/backup_sqlite.sh` + `install_backup_cron.sh` (voir en-têtes des scripts).
+4. **Déploiement depuis un Mac** (rsync, backup SQLite local + distant, build, PM2) — script `lecturai/deploy-production.sh` (variables `DEPLOY_HOST`, `SSH_KEY`, etc. en en-tête).
+
 ## Stack
 
 FastAPI • pipeline transcription + génération de cours (APIs externes configurables) • React • Tailwind • react-markdown • ReportLab PDF • python-docx

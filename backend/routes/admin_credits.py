@@ -14,7 +14,8 @@ from credits_logic import topup_approve_extend_days_default
 from credits_wallet import utc_now
 from database import get_db
 from deps import require_admin_user
-from models import CreditTopUpRequest, User
+from transcription_loyalty import reset_all_transcription_loyalty_counters
+from models import CreditTopUpRequest, User, UserNotification
 from pricing import (
     MRU_PER_USD,
     MARGIN_MULTIPLIER,
@@ -273,6 +274,19 @@ def admin_grant_wallet_manual(
     add_units, mru_nominal = _apply_manual_wallet_delta(usr, body)
 
     db.add(usr)
+
+    # Crée une notification quand l’admin offre des crédits (montant strictement positif uniquement).
+    if add_units > 0:
+        notif = UserNotification(
+            user_id=usr.id,
+            kind="admin_grant",
+            topup_request_id=None,
+            credits_granted=add_units,
+            mru_credited=float(mru_nominal),
+            admin_note=body.admin_note,
+        )
+        db.add(notif)
+
     db.commit()
     db.refresh(usr)
     return _grant_response_payload(usr, add_units=add_units, mru_nominal=mru_nominal)
@@ -351,6 +365,17 @@ def approve_topup(
     row.admin_note = body.admin_note
     db.add(usr)
     db.add(row)
+
+    notif = UserNotification(
+        user_id=usr.id,
+        kind="topup_approved",
+        topup_request_id=row.id,
+        credits_granted=add_units,
+        mru_credited=float(mru_nominal),
+        admin_note=body.admin_note,
+    )
+    db.add(notif)
+
     db.commit()
     db.refresh(usr)
     return _grant_response_payload(usr, add_units=add_units, mru_nominal=mru_nominal)
@@ -372,3 +397,13 @@ def reject_topup(
     db.add(row)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/admin/transcription-loyalty/reset-all")
+def admin_reset_transcription_loyalty_counters(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin_user),
+):
+    """Remet à 0 les heures cumulées par moteur et la somme ``hours_transcribed_lifetime`` pour tous les comptes."""
+    stats = reset_all_transcription_loyalty_counters(db)
+    return {"ok": True, **stats}

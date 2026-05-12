@@ -12,6 +12,7 @@ const STATUS_FR = {
 };
 
 const USERS_PAGE_SIZE = 50;
+const FEEDBACK_PAGE_SIZE = 50;
 
 /** @typedef {{ grantMode: "usd"|"mru", supplierUsd: string, directMru: string, extendDays: string, approveNote: string, rejectNote: string }} RowDraft */
 
@@ -98,6 +99,13 @@ export default function AdminTopUpsPage({ onBack }) {
   const [usersTotal, setUsersTotal] = useState(0);
   const [usersOffset, setUsersOffset] = useState(0);
 
+  const [feedbackFilterInput, setFeedbackFilterInput] = useState("");
+  const [feedbackDebouncedFilter, setFeedbackDebouncedFilter] = useState("");
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackRows, setFeedbackRows] = useState([]);
+  const [feedbackTotal, setFeedbackTotal] = useState(0);
+  const [feedbackOffset, setFeedbackOffset] = useState(0);
+
   const patchDraft = (id, patch) => {
     setDraftById((prev) => {
       const row = prev[id] ?? defaultDraft();
@@ -140,6 +148,15 @@ export default function AdminTopUpsPage({ onBack }) {
   }, [usersDebouncedFilter]);
 
   useEffect(() => {
+    const t = setTimeout(() => setFeedbackDebouncedFilter(feedbackFilterInput.trim()), 360);
+    return () => clearTimeout(t);
+  }, [feedbackFilterInput]);
+
+  useEffect(() => {
+    setFeedbackOffset(0);
+  }, [feedbackDebouncedFilter]);
+
+  useEffect(() => {
     if (adminSection !== "users") return;
     let cancelled = false;
     (async () => {
@@ -170,6 +187,38 @@ export default function AdminTopUpsPage({ onBack }) {
       cancelled = true;
     };
   }, [adminSection, usersOffset, usersDebouncedFilter]);
+
+  useEffect(() => {
+    if (adminSection !== "feedback") return;
+    let cancelled = false;
+    (async () => {
+      setFeedbackLoading(true);
+      try {
+        const qs = new URLSearchParams({
+          limit: String(FEEDBACK_PAGE_SIZE),
+          offset: String(feedbackOffset),
+        });
+        if (feedbackDebouncedFilter.length >= 2) qs.set("q", feedbackDebouncedFilter);
+        const res = await fetch(apiUrl(`/api/admin/feedback/suggestions?${qs}`), { headers: getAuthHeaders(false) });
+        const p = await parseJsonResponse(res);
+        if (cancelled) return;
+        if (!p.ok) throw new Error(p.errorMessage || "Liste des retours inaccessible.");
+        setFeedbackRows(Array.isArray(p.data.items) ? p.data.items : []);
+        setFeedbackTotal(typeof p.data.total === "number" ? p.data.total : 0);
+      } catch (e) {
+        if (!cancelled) {
+          setFeedbackRows([]);
+          setFeedbackTotal(0);
+          toast(e?.message || "Erreur de chargement", "error");
+        }
+      } finally {
+        if (!cancelled) setFeedbackLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [adminSection, feedbackOffset, feedbackDebouncedFilter]);
 
   /** Recherche utilisateurs (sans demande préalable). */
   useEffect(() => {
@@ -377,13 +426,22 @@ export default function AdminTopUpsPage({ onBack }) {
             </button>
           ) : null}
           <h1 className="max-w-full break-words font-display text-2xl font-bold tracking-tight text-slate-900 [overflow-wrap:anywhere] dark:text-white md:text-[1.65rem]">
-            {adminSection === "users" ? "Comptes utilisateurs" : "Validation des recharges"}
+            {adminSection === "users"
+              ? "Comptes utilisateurs"
+              : adminSection === "feedback"
+                ? "Idées & retours"
+                : "Validation des recharges"}
           </h1>
           <p className="mt-2 max-w-full text-[13px] leading-relaxed text-slate-600 [overflow-wrap:anywhere] break-words dark:text-slate-400">
             {adminSection === "users" ? (
               <>
                 Liste paginée de tous les comptes inscrits. Filtre optionnel par e-mail (≥ 2 caractères). Pour ajuster un
                 solde, ouvre la fiche puis passe par <strong className="text-slate-800 dark:text-slate-200">Recharges → Crédit sans demande</strong>.
+              </>
+            ) : adminSection === "feedback" ? (
+              <>
+                Messages envoyés via <strong className="text-slate-800 dark:text-slate-200">Tes idées</strong>. Filtre
+                optionnel par texte (≥ 2 caractères) dans le message ou l’e-mail.
               </>
             ) : (
               <>
@@ -404,6 +462,7 @@ export default function AdminTopUpsPage({ onBack }) {
             {[
               ["topups", "Recharges"],
               ["users", "Utilisateurs"],
+              ["feedback", "Idées"],
             ].map(([key, label]) => (
               <button
                 key={key}
@@ -578,6 +637,111 @@ export default function AdminTopUpsPage({ onBack }) {
                   type="button"
                   disabled={usersOffset + usersRows.length >= usersTotal}
                   onClick={() => setUsersOffset((o) => o + USERS_PAGE_SIZE)}
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                >
+                  Suivant
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {adminSection === "feedback" ? (
+        <section
+          aria-labelledby="admin-feedback-heading"
+          className="min-w-0 overflow-x-clip rounded-3xl border border-slate-200/90 bg-white/95 p-4 shadow-soft-lg dark:border-slate-700/90 dark:bg-slate-900/95 sm:p-6"
+        >
+          <h2 id="admin-feedback-heading" className="font-display text-lg font-bold text-slate-900 dark:text-white">
+            Idées d’amélioration
+          </h2>
+          <div className="mt-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+            <div className="min-w-0 sm:max-w-md sm:flex-1">
+              <label htmlFor="admin-feedback-filter" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Filtrer (message ou e-mail)
+              </label>
+              <input
+                id="admin-feedback-filter"
+                type="search"
+                autoComplete="off"
+                placeholder="ex. paiement / bug / @gmail"
+                value={feedbackFilterInput}
+                onChange={(e) => setFeedbackFilterInput(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/30 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+              />
+              {feedbackFilterInput.trim().length > 0 && feedbackFilterInput.trim().length < 2 ? (
+                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Au moins 2 caractères pour filtrer.</p>
+              ) : null}
+            </div>
+            <p className="text-[12px] tabular-nums text-slate-600 dark:text-slate-400">
+              {feedbackTotal} message{feedbackTotal !== 1 ? "s" : ""}
+              {feedbackDebouncedFilter.length >= 2 ? " (filtrés)" : ""}
+            </p>
+          </div>
+
+          {feedbackLoading ? (
+            <div className="flex justify-center py-16">
+              <div className="flex flex-col items-center gap-3">
+                <div className="size-10 animate-spin rounded-full border-[3px] border-slate-200 border-t-brand-600 dark:border-slate-700 dark:border-t-brand-400" />
+                <p className="text-sm text-slate-500 dark:text-slate-400">Chargement…</p>
+              </div>
+            </div>
+          ) : feedbackRows.length === 0 ? (
+            <p className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 py-12 text-center text-sm text-slate-600 dark:border-slate-600 dark:bg-slate-950/50 dark:text-slate-400">
+              Aucun message pour cette page ou ce filtre.
+            </p>
+          ) : (
+            <div className="mt-6 space-y-3">
+              {feedbackRows.map((r) => {
+                const email = typeof r.user_email === "string" ? r.user_email : "";
+                const msg = typeof r.message === "string" ? r.message : "";
+                const createdAt = typeof r.created_at === "string" ? r.created_at : "";
+                const loc = typeof r.ui_locale === "string" ? r.ui_locale : "";
+                return (
+                  <article
+                    key={r.id}
+                    className="min-w-0 overflow-hidden rounded-3xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-slate-700/80 dark:bg-slate-950/30 sm:p-5"
+                  >
+                    <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                          {email || (r.user_id ? `Utilisateur #${r.user_id}` : "Utilisateur anonyme")}
+                          {loc ? ` · ${loc}` : ""}
+                        </p>
+                        <p className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
+                          <time dateTime={createdAt || undefined}>
+                            {createdAt ? new Date(createdAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "—"}
+                          </time>
+                        </p>
+                      </div>
+                    </div>
+                    <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800 dark:text-slate-200">
+                      {msg || "—"}
+                    </p>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+
+          {!feedbackLoading && feedbackTotal > 0 ? (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Lignes {feedbackOffset + 1}–{feedbackOffset + feedbackRows.length} sur {feedbackTotal}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={feedbackOffset <= 0}
+                  onClick={() => setFeedbackOffset((o) => Math.max(0, o - FEEDBACK_PAGE_SIZE))}
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                >
+                  Précédent
+                </button>
+                <button
+                  type="button"
+                  disabled={feedbackOffset + feedbackRows.length >= feedbackTotal}
+                  onClick={() => setFeedbackOffset((o) => o + FEEDBACK_PAGE_SIZE)}
                   className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                 >
                   Suivant

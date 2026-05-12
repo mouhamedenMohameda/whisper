@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from deps import auth_required, get_current_user_optional, require_user
 from models import CreditTopUpRequest, User
+from transcription_loyalty import all_model_hours_for_user
 from credits_wallet import wallet_block_reason
 from pricing import (
     EXPORT_JOB_PROVIDER_USD,
@@ -18,6 +19,15 @@ from pricing import (
     MRU_WALLET_MICRO,
     MARGIN_MULTIPLIER,
     wallet_units_to_mru_display,
+)
+from transcription_retail_catalog import (
+    LOYALTY_TIER_BOUNDARY_HOURS_1,
+    LOYALTY_TIER_BOUNDARY_HOURS_2,
+    loyalty_meta_for_hours,
+    loyalty_tier_from_lifetime_hours,
+    mru_per_hour_for_tier,
+    public_catalog_entries,
+    get_retail_model,
 )
 
 TOPUP_ROOT = Path(__file__).resolve().parent.parent / "data" / "topups"
@@ -45,6 +55,8 @@ def credits_me(
     blocked = wallet_block_reason(u)
     exp = u.credits_expire_at
     bal_units = int(u.credit_balance)
+    hours_by = all_model_hours_for_user(db, u.id)
+    meta_by = {mid: loyalty_meta_for_hours(hours_by[mid]) for mid in hours_by}
     return {
         "feature_enabled": True,
         "credit_balance": bal_units,
@@ -53,7 +65,43 @@ def credits_me(
         "can_use_features": blocked is None,
         "block_reason": blocked,
         "email": u.email,
+        "transcription_loyalty": {
+            "hours_lifetime_by_model_id": hours_by,
+            "hours_lifetime_total": round(sum(hours_by.values()), 4),
+            "meta_by_model_id": meta_by,
+        },
     }
+
+
+@router.get("/credits/transcription-retail")
+def transcription_retail_catalog_route(
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Grille MRU/h par modèle + paliers ; avec session, tarifs au palier actuel de l’utilisateur."""
+    out: dict = {
+        "tier_boundaries_hours": [LOYALTY_TIER_BOUNDARY_HOURS_1, LOYALTY_TIER_BOUNDARY_HOURS_2],
+        "models": public_catalog_entries(),
+    }
+    if auth_required() and user is not None:
+        u = db.get(User, user.id)
+        if u is not None:
+            hours_by = all_model_hours_for_user(db, u.id)
+            by_id: dict[str, float] = {}
+            for row in out["models"]:
+                mid = row["id"]
+                h = float(hours_by.get(mid, 0.0))
+                spec = get_retail_model(mid)
+                tier = loyalty_tier_from_lifetime_hours(h)
+                by_id[mid] = float(mru_per_hour_for_tier(spec, tier))
+            meta_by = {mid: loyalty_meta_for_hours(float(hours_by.get(mid, 0.0))) for mid in hours_by}
+            out["you"] = {
+                "hours_lifetime_by_model_id": hours_by,
+                "hours_lifetime_total": round(sum(hours_by.values()), 4),
+                "mru_per_hour_by_model_id": by_id,
+                "meta_by_model_id": meta_by,
+            }
+    return out
 
 
 @router.get("/credits/pricing-info")

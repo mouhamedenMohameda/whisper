@@ -29,11 +29,19 @@ from pricing import (
     billed_mru_to_wallet_units_debit,
     estimate_tokens_from_chars,
     groq_chat_provider_usd,
-    local_whisper_provider_usd,
     openai_transcribe_chat_provider_usd,
     transcribe_aggregate_billed_mru,
     wallet_units_to_mru_display,
-    whisper_provider_usd,
+)
+from transcription_loyalty import apply_transcription_lifetime_hours, model_hours_for_user
+from transcription_retail_catalog import (
+    RETAIL_MODELS,
+    TranscriptionRetailModel,
+    audio_hours_from_duration_seconds,
+    canonical_transcription_model_id,
+    get_retail_model,
+    max_mru_per_hour_for_model,
+    retail_mru_for_audio,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,8 +74,14 @@ OPENAI_WHISPER_MAX_UPLOAD_MB = float(os.getenv("OPENAI_WHISPER_MAX_UPLOAD_MB", "
 
 
 def _normalize_transcription_engine(raw: Optional[str]) -> str:
-    s = (raw or "openai").strip().lower()
-    if s in ("local", "local_whisper", "offline", "cpu"):
+    mid = canonical_transcription_model_id(raw)
+    if mid not in RETAIL_MODELS:
+        known = ", ".join(sorted(RETAIL_MODELS.keys()))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Moteur de transcription inconnu (« {raw} »). Modèles pris en charge : {known}.",
+        )
+    if mid == "local":
         if not _lw_addon.is_local_whisper_feature_enabled():
             raise HTTPException(
                 status_code=400,
@@ -76,8 +90,35 @@ def _normalize_transcription_engine(raw: Optional[str]) -> str:
                     "(variable TRANSCRIBE_LOCAL_WHISPER_ENABLED)."
                 ),
             )
-        return "local"
-    return "openai"
+    return mid
+
+
+def _cloud_transcription_clients(spec: TranscriptionRetailModel) -> tuple[Optional[openai.OpenAI], Optional[openai.OpenAI]]:
+    """(client audio ``transcriptions.create``, client OpenAI pour polish / vue mixte si besoin)."""
+    if spec.provider == "local":
+        return None, None
+    if spec.provider == "openai":
+        key = (os.getenv("OPENAI_API_KEY") or "").strip()
+        if not key:
+            raise HTTPException(
+                status_code=500,
+                detail="La clé technique de transcription (OpenAI) est manquante sur le serveur.",
+            )
+        c = openai.OpenAI(api_key=key)
+        return c, c
+    if spec.provider == "groq":
+        gk = (os.getenv("GROQ_API_KEY") or "").strip()
+        if not gk:
+            raise HTTPException(
+                status_code=500,
+                detail="La clé Groq (GROQ_API_KEY) est manquante pour ce modèle de transcription sur le serveur.",
+            )
+        base = (os.getenv("GROQ_OPENAI_BASE_URL") or "https://api.groq.com/openai/v1").strip()
+        audio = openai.OpenAI(api_key=gk, base_url=base)
+        ok = (os.getenv("OPENAI_API_KEY") or "").strip()
+        aux = openai.OpenAI(api_key=ok) if ok else None
+        return audio, aux
+    raise HTTPException(status_code=500, detail="Fournisseur de transcription inconnu.")
 
 
 def _normalize_ui_locale(raw: Optional[str]) -> str:
@@ -111,21 +152,22 @@ def estimate_transcription_job_wallet_hold_units(
     if d <= 0:
         d = 90.0
     d = min(max(d, 1.0), cap_sec)
-    eng = (transcription_engine or "openai").strip().lower()
-    w_usd = local_whisper_provider_usd(d) if eng == "local" else whisper_provider_usd(d)
-    try:
-        extra = float(os.getenv("TRANSCRIBE_JOB_HOLD_EXTRA_PROVIDER_USD", "0.04"))
-    except ValueError:
-        extra = 0.04
-    extra = max(0.0, extra)
-    total_usd = w_usd + extra
+    eng = _normalize_transcription_engine(transcription_engine)
+    spec = get_retail_model(eng)
+    audio_h = audio_hours_from_duration_seconds(d)
     try:
         mult = float(os.getenv("TRANSCRIBE_JOB_HOLD_SAFETY_MULTIPLIER", "1.12"))
     except ValueError:
         mult = 1.12
     mult = max(1.0, min(mult, 2.0))
-    total_usd *= mult
-    mru = transcribe_aggregate_billed_mru(total_usd)
+    worst_mru_h = max_mru_per_hour_for_model(spec)
+    mru_audio_cap = audio_h * worst_mru_h * mult
+    try:
+        chat_buf = float(os.getenv("TRANSCRIBE_JOB_HOLD_CHAT_BUFFER_MRU", "0.45"))
+    except ValueError:
+        chat_buf = 0.45
+    chat_buf = max(0.0, chat_buf)
+    mru = mru_audio_cap + chat_buf
     return billed_mru_to_wallet_units_debit(mru)
 
 
@@ -1744,20 +1786,37 @@ def _cleanup_transcription_tempfiles(
             pass
 
 
+def _openai_transcription_supports_verbose_json(api_model: str) -> bool:
+    """Whisper classique : verbose_json + segments temps.
+
+    Les instantanés ``gpt-4o*`` + ``transcribe`` (OpenAI) n'acceptent que ``json`` / ``text`` —
+    ``verbose_json`` ou ``timestamp_granularities`` provoquent une erreur **400**."""
+    m = (api_model or "").strip().lower()
+    if "gpt-4o" in m and "transcribe" in m:
+        return False
+    return True
+
+
 def _call_whisper_transcription(
     client: openai.OpenAI,
     whisper_path: str,
     speech_language: str,
     whisper_prompt: Optional[str],
+    *,
+    api_model: str = "whisper-1",
 ):
+    verbose = _openai_transcription_supports_verbose_json(api_model)
     with open(whisper_path, "rb") as audio_file:
         create_kw: dict[str, Any] = {
-            "model": "whisper-1",
+            "model": api_model,
             "file": audio_file,
-            "response_format": "verbose_json",
-            "timestamp_granularities": ["segment"],
             "language": speech_language,
         }
+        if verbose:
+            create_kw["response_format"] = "verbose_json"
+            create_kw["timestamp_granularities"] = ["segment"]
+        else:
+            create_kw["response_format"] = "json"
         if whisper_prompt:
             create_kw["prompt"] = whisper_prompt
         return client.audio.transcriptions.create(**create_kw)
@@ -1768,6 +1827,8 @@ def _call_whisper_transcription_merged(
     whisper_chunks: list[tuple[str, float]],
     speech_language: str,
     whisper_prompt: Optional[str],
+    *,
+    api_model: str = "whisper-1",
 ) -> Any:
     """Un ou plusieurs appels Whisper ; fusion des segments avec décalage temporel."""
     if not whisper_chunks:
@@ -1775,7 +1836,15 @@ def _call_whisper_transcription_merged(
     responses: list[Any] = []
     offsets: list[float] = []
     for path, off in whisper_chunks:
-        responses.append(_call_whisper_transcription(client, path, speech_language, whisper_prompt))
+        responses.append(
+            _call_whisper_transcription(
+                client,
+                path,
+                speech_language,
+                whisper_prompt,
+                api_model=api_model,
+            ),
+        )
         offsets.append(off)
     return _merge_whisper_verbose_responses(responses, offsets)
 
@@ -1791,26 +1860,34 @@ def _build_transcribe_success_payload(
     filename: Optional[str],
     audio_preprocess_applied: bool,
     whisper_chunk_count: int = 1,
-    transcription_engine: str = "openai",
+    transcription_engine: str = "whisper-1",
     wallet_reserve_units_already_debited: int = 0,
+    openai_aux_client: Optional[openai.OpenAI] = None,
+    transcription_job_id: Optional[int] = None,
+    audio_duration_estimate_seconds: Optional[float] = None,
 ) -> dict[str, Any]:
+    spec = get_retail_model(transcription_engine)
+    extras_client = openai_aux_client if openai_aux_client is not None else client
+    use_local_cut = spec.provider == "local"
+
     segments_raw = getattr(response, "segments", None) or []
     seg_work = _segments_to_processing_dicts(segments_raw)
-
-    use_local_cut = transcription_engine == "local"
 
     semantic_polish_applied = False
     polish_usage_accum: dict[str, int] = {}
     polish_on = (
         not use_local_cut
-        and client is not None
+        and extras_client is not None
         and _env_truthy("TRANSCRIBE_ENABLE_SEMANTIC_POLISH", False)
         and bool(seg_work)
         and speech_language in ("fr", "ar")
     )
     if polish_on:
         seg_work, polish_usage_accum, semantic_polish_applied = _semantic_polish_segments_openai_pipeline(
-            client, seg_work, subject, speech_language
+            extras_client,
+            seg_work,
+            subject,
+            speech_language,
         )
     else:
         for _sd in seg_work:
@@ -1826,14 +1903,30 @@ def _build_transcribe_success_payload(
     if not timestamped:
         timestamped = verbatim
 
+    seg_end_sec = 0.0
     if segments:
         last = segments[-1]
-        end = last.get("end", 0) if isinstance(last, dict) else last.end
-        duration_min = max(1, int(math.ceil(float(end) / 60)))
-        duration_sec = float(end)
+        end = last.get("end", 0) if isinstance(last, dict) else getattr(last, "end", 0)
+        try:
+            seg_end_sec = max(0.0, float(end or 0))
+        except (TypeError, ValueError):
+            seg_end_sec = 0.0
+
+    # Modèles ``gpt-4o*transcribe`` (json) : pas de segments → pas de ``end`` ; la facturation au prorata
+    # utilisait 0 s et affichait « ~0 MRU ». On retombe sur la durée estimée (ffprobe / TinyTag) du contexte.
+    duration_sec = seg_end_sec
+    if duration_sec <= 0 and audio_duration_estimate_seconds is not None:
+        try:
+            est = max(0.0, float(audio_duration_estimate_seconds))
+            if est > 0:
+                duration_sec = est
+        except (TypeError, ValueError):
+            pass
+
+    if duration_sec > 0:
+        duration_min = max(1, int(math.ceil(duration_sec / 60)))
     else:
         duration_min = 0
-        duration_sec = 0.0
 
     _reject_if_duration_exceeds(duration_sec)
 
@@ -1851,12 +1944,12 @@ def _build_transcribe_success_payload(
 
     text_for_token_est = timestamped or verbatim
     est_tokens = estimate_tokens_from_chars(text_for_token_est)
-    whisper_usd_audio = local_whisper_provider_usd(duration_sec) if use_local_cut else whisper_provider_usd(duration_sec)
+    whisper_usd_audio = 0.0
 
     transcript_mixed_view: Optional[dict[str, Any]] = None
     mixed_usage_update: dict[str, Any] = {}
-    if client is not None and not use_local_cut and _env_truthy("TRANSCRIBE_ENABLE_MIXED_LANG_VIEW", True):
-        m_blocks, mixed_meta = build_transcript_mixed_view_blocks(client, segments, api_text, speech_language)
+    if extras_client is not None and not use_local_cut and _env_truthy("TRANSCRIBE_ENABLE_MIXED_LANG_VIEW", True):
+        m_blocks, mixed_meta = build_transcript_mixed_view_blocks(extras_client, segments, api_text, speech_language)
         _parts_m: list[str] = []
         for b in m_blocks:
             if b.get("kind") == "text":
@@ -1891,10 +1984,22 @@ def _build_transcribe_success_payload(
     groq_pt = int((groq_intel or {}).get("prompt_tokens") or 0) if groq_intel else 0
     groq_ct = int((groq_intel or {}).get("completion_tokens") or 0) if groq_intel else 0
     chat_usd_est = openai_transcribe_chat_provider_usd(chat_prompt_tot, chat_comp_tot) + groq_chat_provider_usd(
-        groq_pt, groq_ct
+        groq_pt,
+        groq_ct,
     )
     provider_usd_total = whisper_usd_audio + chat_usd_est
-    billed_transcribe_total_mru = transcribe_aggregate_billed_mru(provider_usd_total)
+    mru_extras = transcribe_aggregate_billed_mru(chat_usd_est)
+
+    lifetime_before = 0.0
+    if _auth is not None:
+        lifetime_before = float(model_hours_for_user(db, _auth.id, transcription_engine))
+
+    mru_audio, tier_applied, bill_audio_h, rate_applied = retail_mru_for_audio(
+        spec=spec,
+        lifetime_hours_before_job=lifetime_before,
+        duration_seconds=duration_sec,
+    )
+    billed_transcribe_total_mru = float(mru_audio) + float(mru_extras)
 
     payload: dict[str, Any] = {
         "transcription_engine": transcription_engine,
@@ -1922,7 +2027,8 @@ def _build_transcribe_success_payload(
             "whisper_duration_seconds": round(duration_sec, 3),
             "provider_usd_whisper_audio": round(whisper_usd_audio, 8),
             "provider_usd_openai_chat_est": round(
-                openai_transcribe_chat_provider_usd(chat_prompt_tot, chat_comp_tot), 10
+                openai_transcribe_chat_provider_usd(chat_prompt_tot, chat_comp_tot),
+                10,
             ),
             "provider_usd_groq_insight_est": round(groq_chat_provider_usd(groq_pt, groq_ct), 10),
             "provider_usd_transcribe_total": round(provider_usd_total, 10),
@@ -1930,9 +2036,14 @@ def _build_transcribe_success_payload(
             "openai_chat_completion_tokens_used": chat_comp_tot,
             "groq_insight_prompt_tokens": groq_pt,
             "groq_insight_completion_tokens": groq_ct,
-            # Facturation utilisateur agrégée (pas seulement Whisper) pour compat ancien champ :
+            "billed_mru_audio_retail": float(mru_audio),
+            "billed_mru_transcription_extras": float(mru_extras),
             "billed_mru_whisper": float(billed_transcribe_total_mru),
             "billed_mru_transcription_total": float(billed_transcribe_total_mru),
+            "loyalty_tier": tier_applied,
+            "hours_transcribed_for_model_before": round(lifetime_before, 6),
+            "retail_mru_per_hour_applied": float(rate_applied),
+            "billable_audio_hours": round(bill_audio_h, 8),
         },
     }
     if polish_usage_accum:
@@ -1959,6 +2070,14 @@ def _build_transcribe_success_payload(
         else:
             u0 = db.get(User, _auth.id)
             new_bal = int(u0.credit_balance) if u0 else None
+        if duration_sec > 0:
+            apply_transcription_lifetime_hours(
+                db,
+                user_id=_auth.id,
+                model_id=transcription_engine,
+                duration_seconds=duration_sec,
+                job_db_id=transcription_job_id,
+            )
     if new_bal is not None:
         payload["wallet"] = {
             "balance_units": new_bal,
@@ -2026,17 +2145,15 @@ def _materialize_transcribe_context_from_bytes(
     _reject_disallowed_hint_content_type(client_content_type_hint)
 
     transcription_engine = _normalize_transcription_engine(transcription_engine_in)
+    spec = get_retail_model(transcription_engine)
 
-    api_key = os.getenv("OPENAI_API_KEY")
-    if transcription_engine != "local" and not api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="La clé technique de transcription est manquante sur le serveur.",
-        )
+    client: Optional[openai.OpenAI] = None
+    openai_aux: Optional[openai.OpenAI] = None
+    if spec.provider != "local":
+        client, openai_aux = _cloud_transcription_clients(spec)
 
     speech_language = _normalize_speech_language(speech_language_in)
     whisper_prompt = _whisper_prompt(subject, speech_language)
-    client: Optional[openai.OpenAI] = openai.OpenAI(api_key=api_key) if api_key else None
 
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
         tmp.write(content)
@@ -2053,6 +2170,7 @@ def _materialize_transcribe_context_from_bytes(
 
     return {
         "client": client,
+        "openai_aux_client": openai_aux,
         "tmp_path": tmp_path,
         "processed_mp3": processed_mp3,
         "chunk_temp_paths": chunk_temp_paths,
@@ -2062,6 +2180,7 @@ def _materialize_transcribe_context_from_bytes(
         "estimated": estimated,
         "audio_preprocess_single_file": audio_preprocess_single,
         "transcription_engine": transcription_engine,
+        "audio_api_model": spec.api_model,
     }
 
 
@@ -2140,17 +2259,15 @@ def _load_transcribe_context_from_path(
         )
 
     transcription_engine = _normalize_transcription_engine(transcription_engine_in)
+    spec = get_retail_model(transcription_engine)
 
-    api_key = os.getenv("OPENAI_API_KEY")
-    if transcription_engine != "local" and not api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="La clé technique de transcription est manquante sur le serveur.",
-        )
+    client: Optional[openai.OpenAI] = None
+    openai_aux: Optional[openai.OpenAI] = None
+    if spec.provider != "local":
+        client, openai_aux = _cloud_transcription_clients(spec)
 
     speech_language = _normalize_speech_language(speech_language_in)
     whisper_prompt = _whisper_prompt(subject, speech_language)
-    client = openai.OpenAI(api_key=api_key) if api_key else None
     tmp_path = rp
 
     estimated = _estimated_duration_seconds_from_file(tmp_path)
@@ -2164,6 +2281,7 @@ def _load_transcribe_context_from_path(
 
     return {
         "client": client,
+        "openai_aux_client": openai_aux,
         "tmp_path": tmp_path,
         "processed_mp3": processed_mp3,
         "chunk_temp_paths": chunk_temp_paths,
@@ -2173,6 +2291,7 @@ def _load_transcribe_context_from_path(
         "estimated": estimated,
         "audio_preprocess_single_file": audio_preprocess_single,
         "transcription_engine": transcription_engine,
+        "audio_api_model": spec.api_model,
     }
 
 
@@ -2200,19 +2319,22 @@ async def transcribe_audio(
                 ctx["whisper_chunks"],
                 ctx["speech_language"],
                 ctx["whisper_prompt"],
+                api_model=str(ctx.get("audio_api_model") or "whisper-1"),
             )
         n_chunks = len(ctx["whisper_chunks"])
         payload = _build_transcribe_success_payload(
             db=db,
             _auth=_auth,
             client=ctx["client"],
+            openai_aux_client=ctx.get("openai_aux_client"),
             response=response,
             subject=subject,
             speech_language=ctx["speech_language"],
             filename=file.filename,
             audio_preprocess_applied=bool(ctx.get("audio_preprocess_single_file")),
             whisper_chunk_count=n_chunks,
-            transcription_engine=str(ctx.get("transcription_engine") or "openai"),
+            transcription_engine=str(ctx.get("transcription_engine") or "whisper-1"),
+            audio_duration_estimate_seconds=ctx.get("estimated"),
         )
         return JSONResponse(payload)
     except RuntimeError as e:
@@ -2388,6 +2510,7 @@ async def iterate_transcription_events(
                     part_path,
                     ctx["speech_language"],
                     ctx["whisper_prompt"],
+                    api_model=str(ctx.get("audio_api_model") or "whisper-1"),
                 ),
             )
         chunk_est = max(20.0, (total_est / max(1, n_chunks)) * rt_eff * 1.2)
@@ -2526,14 +2649,17 @@ async def iterate_transcription_events(
             db=db,
             _auth=_auth,
             client=ctx["client"],
+            openai_aux_client=ctx.get("openai_aux_client"),
             response=response,
             subject=subject,
             speech_language=ctx["speech_language"],
             filename=display_filename,
             audio_preprocess_applied=bool(ctx.get("audio_preprocess_single_file")),
             whisper_chunk_count=len(ctx["whisper_chunks"]),
-            transcription_engine=str(ctx.get("transcription_engine") or "openai"),
+            transcription_engine=str(ctx.get("transcription_engine") or "whisper-1"),
             wallet_reserve_units_already_debited=int(ctx.get("wallet_reserve_units") or 0),
+            transcription_job_id=ctx.get("transcription_job_id"),
+            audio_duration_estimate_seconds=ctx.get("estimated"),
         )
     except openai.AuthenticationError:
         yield {"type": "error", "detail": "Impossible de finaliser la transcription (service indisponible). Réessaie plus tard."}
