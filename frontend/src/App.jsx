@@ -116,7 +116,7 @@ function normalizeLessonMarkdown(v) {
 }
 
 /** @param {Record<string, unknown>} data Réponse brute API transcription (succès). */
-function historyEntryFromTranscribePayload(data, { filenames, subject, speechLanguage, historyId, transcriptionJobPublicIds }) {
+function historyEntryFromTranscribePayload(data, { filenames, subject, speechLanguage, historyId, transcriptionJobPublicIds, lesson }) {
   const jobIds = Array.isArray(transcriptionJobPublicIds)
     ? transcriptionJobPublicIds.map((x) => String(x || "").trim()).filter(Boolean)
     : transcriptionJobPublicIds
@@ -174,7 +174,7 @@ function historyEntryFromTranscribePayload(data, { filenames, subject, speechLan
     wordCount: wc,
     durationMinutes: Number(data.duration_minutes ?? 0),
     usage: usageSnapshot,
-    lesson: null,
+    lesson: typeof lesson === "string" ? lesson : null,
     deepSummary: ds,
     groqInsightApplied: Boolean(data.groq_insight_applied),
     groqTranscriptTruncated: Boolean(data.groq_transcript_truncated),
@@ -758,6 +758,7 @@ export default function App() {
   const [sessionUsage, setSessionUsage] = useState(() => ({ ...INITIAL_SESSION_USAGE }));
   const [historyBump, reloadHistoryList] = useReducer((x) => x + 1, 0);
   const [currentHistoryId, setCurrentHistoryId] = useState(null);
+  const [currentJobPublicIds, setCurrentJobPublicIds] = useState([]);
 
   const historyItems = useMemo(() => loadHistory(), [historyBump]);
   const badges = useMemo(() => phaseBadgeLabels(phase, t), [phase, t]);
@@ -899,6 +900,7 @@ export default function App() {
     setInsightPanelOpen(false);
     setInsightLoading(false);
     setCurrentHistoryId(null);
+    setCurrentJobPublicIds([]);
     setTranscriptionRatingOffer(null);
     setTranscriptionRatingModalOpen(false);
   };
@@ -918,7 +920,28 @@ export default function App() {
     setWordCount(entry.wordCount || 0);
     setDurationMinutes(entry.durationMinutes ?? 0);
     setPrimaryName(entry.displayTitle || "");
-    setLesson(normalizeLessonMarkdown(entry.lesson));
+    let lessonToUse = normalizeLessonMarkdown(entry.lesson);
+    if (!lessonToUse.trim() && Array.isArray(entry.transcriptionJobPublicIds) && entry.transcriptionJobPublicIds.length > 0) {
+      const jid = entry.transcriptionJobPublicIds[0];
+      void (async () => {
+        try {
+          const full = await getTranscriptionJob(jid, { include_result: false });
+          if (full.lesson && typeof full.lesson === "string" && full.lesson.trim()) {
+            const normalized = normalizeLessonMarkdown(full.lesson);
+            setLesson(normalized);
+            updateEntry(entry.id, { lesson: normalized });
+            setLessonViewBoundaryKey((k) => k + 1);
+            if (phase === "editing" || phase === "lesson") {
+               setPhase("lesson");
+               setActiveTab("lesson");
+            }
+          }
+        } catch (e) {
+          logger.error("Failed to fetch lesson from job %s", jid, e);
+        }
+      })();
+    }
+    setLesson(lessonToUse);
     setTranscriptMixedView(entry.transcriptMixedView ?? null);
     setAsrPassagesAnnotated(Array.isArray(entry.asrPassagesAnnotated) ? entry.asrPassagesAnnotated : []);
     setDeepSummary(entry.deepSummary || "");
@@ -940,6 +963,7 @@ export default function App() {
       groqInsightOptionalBilledMru: Number(u.groqInsightOptionalBilledMru ?? 0),
     });
     setCurrentHistoryId(entry.id);
+    setCurrentJobPublicIds(Array.isArray(entry.transcriptionJobPublicIds) ? entry.transcriptionJobPublicIds : []);
     const hasLesson = Boolean(normalizeLessonMarkdown(entry.lesson).trim());
     setActiveTab(hasLesson ? "lesson" : "transcript");
     setPhase(hasLesson ? "lesson" : "editing");
@@ -1014,6 +1038,7 @@ export default function App() {
                 subject: typeof full.subject === "string" ? full.subject : t("common.general"),
                 speechLanguage: full.speech_language === "ar" ? "ar" : "fr",
                 transcriptionJobPublicIds: [jobId],
+                lesson: full.lesson,
               }),
             );
             forgetBgTranscribeJobId(jobId);
@@ -1107,6 +1132,7 @@ export default function App() {
                 typeof terminalRow.subject === "string" ? terminalRow.subject.trim() || t("common.general") : t("common.general"),
               speechLanguage: terminalRow.speech_language === "ar" ? "ar" : "fr",
               transcriptionJobPublicIds: [jobId],
+              lesson: terminalRow.lesson,
             }),
           );
           reloadHistoryList();
@@ -1484,6 +1510,7 @@ export default function App() {
         transcriptionJobPublicIds: jobPublicIdsCollected,
       });
       setCurrentHistoryId(hid);
+      setCurrentJobPublicIds(jobPublicIdsCollected);
       reloadHistoryList();
 
       setPhase("editing");
@@ -1617,12 +1644,15 @@ export default function App() {
     setPhase("generating");
     void import("./components/LessonViewer.jsx").catch(() => {});
     try {
+      const firstJobId = Array.isArray(currentJobPublicIds) && currentJobPublicIds.length > 0 ? currentJobPublicIds[0] : null;
+
       const result = await generateLesson(
         transcript,
         subject || "General",
         transcriptMixedView,
         asrPassagesAnnotated,
         i18n.language,
+        firstJobId,
       );
       const gu = result.usage || {};
       const cin = gu.groq_input_tokens ?? result.input_tokens ?? 0;

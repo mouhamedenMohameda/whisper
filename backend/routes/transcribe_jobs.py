@@ -515,6 +515,7 @@ def _serialize_job(job: TranscriptionJob, *, include_result: bool) -> dict[str, 
         "phase": job.phase,
         "message": job.status_message,
         "estimated_duration_seconds": job.estimated_duration_seconds,
+        "lesson": job.lesson_markdown,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "updated_at": job.updated_at.isoformat() if job.updated_at else None,
     }

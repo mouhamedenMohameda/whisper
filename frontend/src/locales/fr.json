@@ -369,6 +369,8 @@
     "untitled": "Sans titre",
     "title": "Historique des transcriptions",
     "subtitle": "Sauvegardé sur cet appareil (navigateur). Les lignes précédentes restent consultables après rechargement de la page.",
+    "searchPlaceholder": "Rechercher par titre, matière...",
+    "noResults": "Aucun résultat pour cette recherche.",
     "backHome": "← Retour à l'accueil",
     "empty": "Aucune transcription enregistrée pour le moment.",
     "emptyHint": "Lance une transcription depuis l'accueil pour remplir l’historique.",

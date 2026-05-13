@@ -146,6 +146,10 @@ class GenerateRequest(BaseModel):
         default=None,
         description="Passages Whisper avec reliability (réponse /transcribe) — entrée canonique du collage.",
     )
+    job_public_id: Optional[str] = Field(
+        default=None,
+        description="ID public de la tâche de transcription associée (pour persistance).",
+    )
 
 
 @router.post("/generate")
@@ -232,6 +236,18 @@ async def generate_lesson(
 
     charge_units = billed_mru_to_wallet_units_debit(groq_mru)
     new_bal, charged = debit_credits(db, _auth, charge_units)
+
+    if req.job_public_id:
+        # Tente de sauvegarder le cours en base pour les consultations futures (Amélioration : consulter sans regénérer).
+        from sqlalchemy import select
+        from models import TranscriptionJob
+        job = db.scalars(select(TranscriptionJob).where(TranscriptionJob.public_id == req.job_public_id)).first()
+        if job:
+            if _auth is None or job.user_id == _auth.id:
+                job.lesson_markdown = lesson_markdown
+                db.add(job)
+                db.commit()
+
 
     payload = {
         "lesson": lesson_markdown,

@@ -58,10 +58,22 @@ function TechnicalConsumptionBlock({ usage = {}, whisperMin, mruEst, t }) {
 export default function TranscriptionHistoryPage({ items, onBack, onOpen, onDelete }) {
   const { t } = useTranslation();
   const [expandedId, setExpandedId] = useState(/** @type {string | null} */ (null));
+  const [searchQuery, setSearchQuery] = useState("");
 
   const toggleExpanded = (id) => {
     setExpandedId((cur) => (cur === id ? null : id));
   };
+
+  const filteredItems = items.filter((item) => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      item.displayTitle?.toLowerCase().includes(q) ||
+      item.subject?.toLowerCase().includes(q) ||
+      item.filenames?.some((f) => f.toLowerCase().includes(q))
+    );
+  });
+
 
   return (
     <div className="mx-auto max-w-5xl space-y-8">
@@ -69,6 +81,22 @@ export default function TranscriptionHistoryPage({ items, onBack, onOpen, onDele
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t("history.title")}</h1>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{t("history.subtitle")}</p>
+        </div>
+        <div className="flex grow items-center gap-2 sm:max-w-xs">
+          <div className="relative w-full">
+            <span className="absolute inset-y-0 left-3 flex items-center text-slate-400">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </span>
+            <input
+              type="text"
+              placeholder={t("history.searchPlaceholder") || "Rechercher..."}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-4 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            />
+          </div>
         </div>
         <button
           type="button"
@@ -84,6 +112,16 @@ export default function TranscriptionHistoryPage({ items, onBack, onOpen, onDele
           <p className="text-slate-600 dark:text-slate-400">{t("history.empty")}</p>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-500">{t("history.emptyHint")}</p>
         </div>
+      ) : filteredItems.length === 0 ? (
+        <div className="glass-panel rounded-3xl border border-dashed border-slate-300/80 p-12 text-center dark:border-slate-700 dark:!bg-slate-900/40">
+          <p className="text-slate-600 dark:text-slate-400">{t("history.noResults") || "Aucun résultat pour cette recherche."}</p>
+          <button
+            onClick={() => setSearchQuery("")}
+            className="mt-4 text-sm font-semibold text-brand-600 hover:underline"
+          >
+            Effacer la recherche
+          </button>
+        </div>
       ) : (
         <>
           <div className="glass-panel hidden overflow-hidden rounded-3xl shadow-soft dark:!bg-slate-900/70 lg:block">
@@ -98,7 +136,7 @@ export default function TranscriptionHistoryPage({ items, onBack, onOpen, onDele
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {items.map((row) => {
+                {filteredItems.map((row) => {
                   const u = row.usage || {};
                   const whisperMin = u.whisperAudioSeconds ? (u.whisperAudioSeconds / 60).toFixed(2) : "—";
                   const hasLesson = Boolean(row.lesson && row.lesson.length > 0);
@@ -177,7 +215,7 @@ export default function TranscriptionHistoryPage({ items, onBack, onOpen, onDele
           </div>
 
           <ul className="space-y-3 lg:hidden">
-            {items.map((row) => {
+            {filteredItems.map((row) => {
               const u = row.usage || {};
               const whisperMin = u.whisperAudioSeconds ? (u.whisperAudioSeconds / 60).toFixed(2) : "—";
               const hasLesson = Boolean(row.lesson && row.lesson.length > 0);

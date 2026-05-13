@@ -9,7 +9,7 @@ import QuizModule from "./QuizModule.jsx";
 import TranscriptMixedView from "./TranscriptMixedView.jsx";
 import UsageDetailsToggle from "./UsageDetailsToggle.jsx";
 import { allocateLessonBilledMru } from "../utils/allocateLessonBilledMru.js";
-import { extractNavHeadings, slugify } from "../utils/lessonParsers.js";
+import { extractNavHeadings, slugify, stripQuizAndFlashcards, extractQuizMarkdownSection, extractFlashcardsMarkdownSection } from "../utils/lessonParsers.js";
 import { estimateTokensFromText, formatMru } from "../utils/usage.js";
 
 function textFromChildren(children) {
@@ -92,7 +92,8 @@ export default function LessonViewer({
 }) {
   const { t } = useTranslation();
   const lessonMd = typeof lesson === "string" ? lesson : "";
-  const headings = extractNavHeadings(lessonMd);
+  const displayLessonMd = useMemo(() => stripQuizAndFlashcards(lessonMd), [lessonMd]);
+  const headings = extractNavHeadings(displayLessonMd);
   const u = usage || {};
   const transcriptTok = estimateTokensFromText(transcript);
   let splitLesson = { cours: 0, quiz: 0, fiches: 0 };
@@ -110,6 +111,13 @@ export default function LessonViewer({
   } catch (e) {
     console.error("LessonViewer allocation error", e);
   }
+
+  const exportMd = useMemo(() => {
+    if (activeTab === "quiz") return extractQuizMarkdownSection(lessonMd);
+    if (activeTab === "flashcards") return extractFlashcardsMarkdownSection(lessonMd);
+    if (activeTab === "transcript") return transcript || "";
+    return displayLessonMd;
+  }, [activeTab, lessonMd, displayLessonMd, transcript]);
 
   const mruCoursTab = splitLesson.cours;
   const mruQuizTab = splitLesson.quiz;
@@ -162,7 +170,13 @@ export default function LessonViewer({
           <div className="font-display text-xl font-bold text-emerald-900 dark:text-emerald-100">{t("lesson.readyTitle")}</div>
           <p className="mt-1 text-sm leading-relaxed text-emerald-900/85 dark:text-emerald-200/90">{t("lesson.readySub")}</p>
         </div>
-        <ExportButtons lesson={lessonMd} subject={subject} filename={filename} language={language} disabled={false} />
+        <ExportButtons 
+          lesson={exportMd} 
+          subject={activeTab === "quiz" ? `${subject} - Quiz` : activeTab === "flashcards" ? `${subject} - Fiches` : subject} 
+          filename={activeTab === "quiz" ? `${filename}_quiz` : activeTab === "flashcards" ? `${filename}_fiches` : filename} 
+          language={language} 
+          disabled={false} 
+        />
       </div>
 
       <div className="glass-panel rounded-3xl p-5 text-sm shadow-soft">
@@ -294,7 +308,7 @@ export default function LessonViewer({
           {activeTab === "lesson" && (
             <article className="glass-panel prose prose-slate max-w-none rounded-3xl p-5 dark:prose-invert prose-headings:scroll-mt-28 prose-headings:font-display prose-li:my-1 prose-table:border-collapse prose-table:text-sm prose-th:bg-slate-100 prose-th:px-3 prose-th:py-2 dark:prose-th:bg-slate-900 prose-td:border prose-td:border-slate-200 prose-td:px-3 prose-td:py-2 dark:prose-td:border-slate-800 sm:p-8">
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                {lessonMd}
+                {displayLessonMd}
               </ReactMarkdown>
             </article>
           )}

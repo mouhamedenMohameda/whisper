@@ -154,6 +154,7 @@ class TranscriptionJob(Base):
     estimated_duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     result_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    lesson_markdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Réserve portefeuille (unités wallet) débitée au passage « queued → processing » si TRANSCRIBE_JOB_WALLET_HOLD ; libérée ou soldée au résultat.
     wallet_reserved_units: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)

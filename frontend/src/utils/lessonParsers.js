@@ -14,6 +14,33 @@ export function slugify(raw) {
   return s || "section";
 }
 
+export function extractQuizMarkdownSection(text) {
+  const md = String(text || "");
+  if (!md.trim()) return "";
+
+  const h2 = [...md.matchAll(/^##\s+(.+)$/gm)].map((m) => ({
+    title: (m[1] || "").trim(),
+    idx: m.index ?? 0,
+  }));
+
+  const isQuizHeading = (t) =>
+    /(practice\s*quiz|quiz|qcm|questions?\s*(?:à\s*choix|a\s*choix|choix)\s*multiples?|questions?\s*multi|exercices?\s*\(?qcm\)?)/i.test(
+      String(t || ""),
+    );
+  const isQuizHeadingAr = (t) => /(اختبار|امتحان|أسئلة|اسئلة|اختبار\s*قصير)/i.test(String(t || ""));
+
+  const startIdx = h2.findIndex((h) => isQuizHeading(h.title) || isQuizHeadingAr(h.title));
+  if (startIdx !== -1) {
+    const s0 = h2[startIdx].idx;
+    const next = h2[startIdx + 1];
+    return next ? md.slice(s0, next.idx) : md.slice(s0);
+  }
+
+  // Fallback
+  const s = md.split(/##\s*6\.\s*/i)[1]?.split(/##\s*7\./i)[0] || "";
+  return s ? `## Quiz\n${s}` : "";
+}
+
 export function extractNavHeadings(markdown) {
   const items = [];
   const re = /^##\s+(.+)$/gm;
@@ -168,7 +195,7 @@ export function parseQuiz(md) {
  * Extrait le bloc markdown des fiches : même logique flexible que le quiz (titres ##),
  * puis repli sur la structure numérotée demandée au modèle.
  */
-function extractFlashcardsMarkdownSection(text) {
+export function extractFlashcardsMarkdownSection(text) {
   const md = String(text || "");
   if (!md.trim()) return "";
 
@@ -238,4 +265,56 @@ export function parseFlashcards(md) {
   }
 
   return cards;
+}
+
+/**
+ * Nettoie le markdown pour n'en garder que la partie "Cours"
+ * (retire les sections Quiz et Flashcards).
+ */
+export function stripQuizAndFlashcards(markdown) {
+  const md = String(markdown || "");
+  if (!md.trim()) return "";
+
+  const isQuiz = (t) =>
+    /(practice\s*quiz|quiz|qcm|questions?\s*(?:à\s*choix|a\s*choix|choix)\s*multiples?|questions?\s*multi|exercices?\s*\(?qcm\)?)/i.test(
+      String(t || ""),
+    );
+  const isQuizAr = (t) => /(اختبار|امتحان|أسئلة|اسئلة|اختبار\s*قصير)/i.test(String(t || ""));
+
+  // Version plus robuste : trouver les index de début des sections indésirables.
+  const h2 = [...md.matchAll(/^##\s+(.+)$/gm)].map((m) => ({
+    title: (m[1] || "").trim(),
+    idx: m.index ?? 0,
+  }));
+
+  let firstBadIdx = -1;
+  const badSections = [];
+
+  h2.forEach((h, i) => {
+    if (isQuiz(h.title) || isQuizAr(h.title) || isFlashcardsSectionTitle(h.title)) {
+      badSections.push({ start: h.idx, end: h2[i+1] ? h2[i+1].idx : md.length });
+    }
+  });
+
+  if (badSections.length === 0) return md;
+
+  // Reconstruire le markdown en sautant les zones "bad"
+  let result = "";
+  let lastPos = 0;
+  badSections.sort((a, b) => a.start - b.start);
+
+  for (const range of badSections) {
+    result += md.slice(lastPos, range.start);
+    lastPos = range.end;
+  }
+  result += md.slice(lastPos);
+
+  // Re-numérotation des titres ## N. Titre ou ## Titre
+  let currentNum = 1;
+  // Regex plus tolérante pour attraper "## 1. Titre", "## 1 Titre", "## Titre"
+  const renumbered = result.replace(/^##\s+(?:(\d+)[.)]\s+)?(.+)$/gm, (match, oldNum, title) => {
+    return `## ${currentNum++}. ${title}`;
+  });
+
+  return renumbered.trim();
 }

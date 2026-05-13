@@ -83,6 +83,12 @@ ANTHROPIC_OUTPUT_USD_PER_MTOK = _f("ANTHROPIC_OUTPUT_USD_PER_MTOK", 15.0)
 # Export PDF/DOCX : coût forfaitaire fournisseur USD (hors API), facturé comme le reste avec marge MRU.
 EXPORT_JOB_PROVIDER_USD = _f("EXPORT_JOB_PROVIDER_USD", 0.0005)
 
+# Export Premium LaTeX : coût incluant l'appel AI de conversion + complexité de rendu.
+# Fixé pour arriver à environ 8 MRU (0.15625 * 40 * 1.28 = 8).
+EXPORT_PREMIUM_LATEX_PROVIDER_USD = _f("EXPORT_PREMIUM_LATEX_PROVIDER_USD", 0.15625)
+
+
+
 
 def usd_provider_to_billed_mru(usd_provider: float) -> float:
     return _nonneg(usd_provider) * MRU_PER_USD * MARGIN_MULTIPLIER
@@ -235,6 +241,36 @@ def claude_billed(input_tokens: int, output_tokens: int) -> tuple[float, float]:
 def export_job_billed() -> tuple[float, float]:
     u = EXPORT_JOB_PROVIDER_USD
     return float(u), usd_provider_to_billed_mru(u)
+
+
+def export_premium_billed() -> tuple[float, float]:
+    u = EXPORT_PREMIUM_LATEX_PROVIDER_USD
+    return float(u), usd_provider_to_billed_mru(u)
+
+
+def latex_conversion_billed_mru(markdown_text: str) -> tuple[float, float]:
+    """
+    Estime le coût réel de l'IA (Groq) et applique une marge de x8.
+    """
+    # Estimation des tokens (1 token ≈ 4 caractères)
+    input_tokens = estimate_tokens_from_chars(markdown_text)
+    # On prévoit une sortie LaTeX environ 2x plus longue que le Markdown source (macros, préambule, etc.)
+    output_tokens = int(input_tokens * 2.0)
+    
+    # Coût fournisseur USD (basé sur les tarifs du modèle 70B par défaut)
+    usd_in = (input_tokens / 1_000_000.0) * GROQ_INPUT_USD_PER_MTOK
+    usd_out = (output_tokens / 1_000_000.0) * GROQ_OUTPUT_USD_PER_MTOK
+    total_provider_usd = usd_in + usd_out
+    
+    # Marge de x8 demandée par le client (revente premium)
+    margin = 8.0
+    billed_mru = total_provider_usd * MRU_PER_USD * margin
+    
+    return float(total_provider_usd), float(billed_mru)
+
+
+
+
 
 
 def estimate_max_transcribe_wallet_units(duration_seconds: float, transcription_engine: str = "openai") -> int:

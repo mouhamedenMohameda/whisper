@@ -152,6 +152,12 @@ def ensure_transcription_jobs_schema(engine: Engine) -> None:
             else:
                 conn.execute(text("ALTER TABLE transcription_jobs ADD COLUMN lifetime_hours_applied FLOAT"))
 
+    cols = {c["name"] for c in insp.get_columns("transcription_jobs")}
+    if "lesson_markdown" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE transcription_jobs ADD COLUMN lesson_markdown TEXT"))
+
+
 
 def ensure_notification_schema(engine: Engine) -> None:
     """Crée la table ``user_notifications`` si elle n’existe pas (déploiement avant cette feature)."""

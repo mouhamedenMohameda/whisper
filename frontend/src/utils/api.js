@@ -636,7 +636,7 @@ export async function requestTranscriptInsight(transcript, subject, speechLangua
   return /** @type {Record<string, unknown>} */ (data);
 }
 
-export async function generateLesson(transcript, subject, transcriptMixedView, asrPassagesAnnotated, uiLanguage) {
+export async function generateLesson(transcript, subject, transcriptMixedView, asrPassagesAnnotated, uiLanguage, jobPublicId) {
   const body = {
     transcript,
     subject: subject || "General",
@@ -649,6 +649,9 @@ export async function generateLesson(transcript, subject, transcriptMixedView, a
   }
   if (transcriptMixedView && typeof transcriptMixedView === "object") {
     body.transcript_mixed_view = transcriptMixedView;
+  }
+  if (typeof jobPublicId === "string" && jobPublicId.trim()) {
+    body.job_public_id = jobPublicId.trim();
   }
 
   // BUG 8 — Timeout de 6 minutes pour éviter une coupure silencieuse du navigateur
@@ -728,3 +731,34 @@ export async function downloadExport(kind, body, downloadName) {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+export async function estimatePremiumPdf(body) {
+  const res = await fetch(apiUrl("/api/export/pdf-professional/estimate"), {
+    method: "POST",
+    headers: getAuthHeaders(true),
+    body: JSON.stringify(body),
+  });
+  const { ok, data, errorMessage } = await parseJsonResponse(res);
+  if (!ok) throw new Error(errorMessage || "Estimation impossible.");
+  return data;
+}
+
+export async function downloadPremiumPdf(body, downloadName) {
+  const res = await fetch(apiUrl("/api/export/pdf-professional/generate"), {
+    method: "POST",
+    headers: getAuthHeaders(true),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const msg = await safeJsonDetail(res);
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = downloadName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+

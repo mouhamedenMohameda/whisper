@@ -1,5 +1,6 @@
 import io
 import re
+import logging
 from datetime import datetime
 import asyncio
 from typing import Annotated, Optional
@@ -10,13 +11,26 @@ from deps import require_wallet_user
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt, RGBColor
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from models import User
-from pricing import billed_mru_to_wallet_units_debit, export_job_billed
+from pricing import (
+    billed_mru_to_wallet_units_debit,
+    export_job_billed,
+    export_premium_billed,
+    wallet_units_to_mru_display,
+    latex_conversion_billed_mru,
+)
+from course_from_transcript import _groq_client, _groq_chat
+from groq import Groq
+import os
+import subprocess
+import tempfile
+import shutil
+
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
@@ -31,6 +45,8 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -386,3 +402,167 @@ async def export_docx(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{safe_name}_lesson.docx"'},
     )
+
+
+LATEX_PREMIUM_SYSTEM_PROMPT = """You are an Elite Academic Publisher and master LaTeX Typographer.
+The user is paying for an ULTRA-PREMIUM experience. The document must be visually stunning, perfectly balanced, and evoke the quality of an expensive textbook from a top-tier university (Harvard/Oxford style).
+
+# Visual & Typographic Requirements:
+- Use 'article' class with [11pt, a4paper].
+- Essential Packages:
+    - 'geometry' (left=2cm, right=2cm, top=2.5cm, bottom=2.5cm).
+    - 'libertine', 'biolinum', 'inconsolata'.
+    - 'lettrine', 'microtype', 'xcolor' (dvipsnames), 'titlesec', 'fancyhdr', 'booktabs', 'multicol', 'enumitem', 'tabularx'.
+    - 'tcolorbox' (v4+) with 'skins' and 'breakable'.
+
+# Custom Elite Styles (MUST use these definitions in the preamble):
+1. \definecolor{primary}{HTML}{1e1b4b} \definecolor{accent}{HTML}{4f46e5} \definecolor{bglight}{HTML}{f8fafc}
+2. \newtcolorbox{DefinitionBox}[1]{colback=accent!5, colframe=accent, fonttitle=\bfseries\sffamily, title=#1, arc=4pt, breakable, enhanced, shadow={1mm}{-1mm}{0mm}{accent!20}}
+3. \newtcolorbox{TakeawayBox}{colback=bglight, colframe=accent, leftrule=4pt, rightrule=0pt, toprule=0pt, bottomrule=0pt, sharp corners, breakable}
+4. \newtcolorbox{WarningBox}[1]{colback=red!5, colframe=red!75!black, fonttitle=\bfseries\sffamily, title=#1, arc=4pt, breakable}
+
+# Layout Rules:
+- COVER PAGE: Use \begin{titlepage}, \centering, \vspace*{4cm}, Massive Title in \Huge\bfseries\color{primary}, \vfill, "Édition Premium par LecturAI" in \small\scshape, \end{titlepage}.
+- TABLES: ALWAYS use 'tabularx' with width '\linewidth' and at least one 'X' column for long text to prevent margin overflow. Use 'booktabs' rules (\toprule, \midrule, \bottomrule).
+- HEADERS: Fancyhdr with 'LecturAI Elite Series' and section names.
+- SECTIONING: Large Biolinum Bold fonts with a thin rule below.
+- ENUMERATION: Use enumitem for tight, professional lists.
+- TYPOGRAPHY: Use \lettrine for the first letter of the introduction.
+
+# Technical Rigor:
+- ESCAPE ALL SPECIAL CHARACTERS: (%, &, $, #, _, {, }, ~, ^, \\). 
+- If text contains equations, use AMS-LaTeX.
+- Ensure perfect French support via babel.
+- DANGER: DO NOT WRAP THE OUTPUT IN MARKDOWN CODE BLOCKS (```latex). 
+- OUTPUT ONLY THE RAW LATEX SOURCE CODE starting with \documentclass. No backticks.
+"""
+
+
+
+@router.post("/export/pdf-professional/estimate")
+async def estimate_premium_pdf(
+    req: ExportRequest,
+    _u: Annotated[Optional[User], Depends(require_wallet_user)],
+):
+    """Estime le coût du PDF Premium basé sur un multiplicateur x8 du coût IA."""
+    _, billed_mru = latex_conversion_billed_mru(req.lesson)
+    return {
+        "cost_mru": billed_mru,
+        "cost_display": f"{wallet_units_to_mru_display(billed_mru_to_wallet_units_debit(billed_mru))} MRU",
+        "has_credits": _u.credit_balance >= billed_mru_to_wallet_units_debit(billed_mru) if _u else False,
+    }
+
+
+@router.post("/export/pdf-professional/generate")
+async def export_pdf_professional(
+    req: ExportRequest,
+    db: Annotated[Session, Depends(get_db)],
+    _u: Annotated[Optional[User], Depends(require_wallet_user)],
+):
+    """Génère un PDF professionnel via LaTeX avec facturation x8 du coût réel."""
+    # 1. Vérification crédits basée sur l'estimation dynamique
+    _, billed_mru = latex_conversion_billed_mru(req.lesson)
+    charged = billed_mru_to_wallet_units_debit(billed_mru)
+    
+    if _u and _u.credit_balance < charged:
+        raise HTTPException(status_code=402, detail="Crédits insuffisants pour l'export professionnel.")
+
+    # 2. Tentative de génération (avec jusqu'à 2 essais supplémentaires en cas d'échec de compilation)
+    api_key = (os.getenv("GROQ_API_KEY") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=500, detail="Clé API manquante pour la conversion LaTeX.")
+
+    client = _groq_client(api_key)
+    model = os.getenv("GROQ_LATEX_MODEL", "llama-3.3-70b-versatile")
+    user_prompt = f"Subject: {req.subject}\nLanguage: {req.language}\n\nMARKDOWN LESSON:\n{req.lesson}"
+    
+    pdf_data = None
+    last_error = ""
+    max_attempts = 3
+
+    for attempt in range(max_attempts):
+        try:
+            # Appel IA
+            latex_code, _, _ = _groq_chat(
+                client,
+                model=model,
+                system=LATEX_PREMIUM_SYSTEM_PROMPT,
+                user=user_prompt + (f"\n\nIMPORTANT: Your previous attempt failed to compile. Please double check for unescaped special characters like &, %, $, #, _ outside of math mode." if attempt > 0 else ""),
+                max_tokens=16384,
+                temperature=0.2 + (attempt * 0.1), # Un peu plus de créativité à chaque essai
+            )
+
+            # Compilation LaTeX
+            # Nettoyage si l'IA a mis des backticks ou du texte avant/après
+            latex_code = latex_code.strip()
+            if "```" in latex_code:
+                # On essaie d'extraire ce qu'il y a entre les premiers ```latex et les derniers ```
+                match = re.search(r"```(?:latex)?\n?(.*?)\n?```", latex_code, re.DOTALL)
+                if match:
+                    latex_code = match.group(1).strip()
+                else:
+                    # Si on trouve des backticks mais pas le bloc complet, on les vire juste
+                    latex_code = re.sub(r"```[a-z]*\n?", "", latex_code)
+                    latex_code = latex_code.replace("```", "")
+
+            # Si ça commence toujours pas par \documentclass, on cherche la première occurrence
+            if "\\documentclass" in latex_code and not latex_code.startswith("\\documentclass"):
+                latex_code = latex_code[latex_code.find("\\documentclass"):]
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tex_file = os.path.join(tmpdir, "lesson.tex")
+                with open(tex_file, "w", encoding="utf-8") as f:
+                    f.write(latex_code)
+                
+                try:
+                    # On lance pdflatex deux fois pour la table des matières
+                    process = subprocess.run(
+                        ["pdflatex", "-interaction=nonstopmode", "-output-directory", tmpdir, tex_file],
+                        capture_output=True,
+                        text=True,
+                        timeout=60
+                    )
+                    
+                    pdf_path = os.path.join(tmpdir, "lesson.pdf")
+                    if os.path.exists(pdf_path):
+                        # On lance la deuxième passe seulement si la première a produit un PDF
+                        subprocess.run(
+                            ["pdflatex", "-interaction=nonstopmode", "-output-directory", tmpdir, tex_file],
+                            capture_output=True,
+                            text=True,
+                            timeout=60
+                        )
+                        with open(pdf_path, "rb") as f:
+                            pdf_data = f.read()
+                        break # Succès ! On sort de la boucle
+                    else:
+                        last_error = f"Compilation attempt {attempt + 1} failed: {process.stdout[:500]}"
+                        logger.warning(f"LaTeX Attempt {attempt + 1} failed. Output: {process.stdout[:200]}")
+                except FileNotFoundError:
+                    raise HTTPException(
+                        status_code=501, 
+                        detail="Le moteur de rendu LaTeX (pdflatex) n'est pas installé sur ce serveur."
+                    )
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"LaTeX Generation Attempt {attempt + 1} failed with error: {e}")
+
+    if not pdf_data:
+        raise HTTPException(
+            status_code=502, 
+            detail=f"Échec de la génération après {max_attempts} tentatives. Erreur: {last_error}"
+        )
+
+    # 3. Débit crédits (Seulement si succès)
+    if charged > 0:
+        debit_credits(db, _u, charged)
+
+    buffer = io.BytesIO(pdf_data)
+
+    safe_name = re.sub(r"[^\w\-]", "_", req.filename)
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}_professional.pdf"'},
+    )
+
