@@ -2177,7 +2177,7 @@ def _materialize_transcribe_context_from_file_path(
         if user_credit_balance < max_cost:
             raise HTTPException(
                 status_code=402,
-                detail=f"Solde insuffisant. Cette transcription est estimée à {max_cost} MRU au maximum, vous n'en avez que {user_credit_balance}."
+                detail=f"Solde insuffisant. Cette transcription est estimée à {wallet_units_to_mru_display(max_cost)} MRU au maximum, vous n'en avez que {wallet_units_to_mru_display(user_credit_balance)} MRU."
             )
 
         whisper_chunks, chunk_temp_paths, audio_preprocess_single = _prepare_whisper_chunks(

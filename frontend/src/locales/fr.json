@@ -180,7 +180,7 @@
     "pointLargeWord": "volumineux acceptés",
     "point2": "L’étape suivante te permet de <corr>corriger le transcript</corr> avant de générer le cours.",
     "dropTitle": "Glisse-dépose ou touche pour parcourir",
-    "dropHint": "{{ext}} — audio uniquement · fichiers longs pris en charge (découpage automatique) · jusqu’à {{h}} h par fichier · plusieurs fichiers autorisés",
+    "dropHint": "{{ext}} — audio uniquement · fichiers longs pris en charge (découpage automatique) · jusqu’à {{h}} h par fichier · un seul fichier autorisé",
     "importAudio": "Importer des fichiers audio",
     "estDur": "Est. durée",
     "sendPct": "Envoi {{n}}%",

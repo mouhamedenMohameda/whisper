@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 
+from pricing import MRU_WALLET_MICRO
+
 
 def credits_transcribe() -> int:
     """Débit fixe désactivé : le débit suit le coût API en MRU (voir routes transcribe/export). Conservé pour compat refs."""
@@ -26,7 +28,7 @@ def registration_bonus_credits() -> int:
     """
     raw = os.getenv("CREDITS_REGISTRATION_BONUS")
     if raw is None or str(raw).strip() == "":
-        return 0
+        return 5 * MRU_WALLET_MICRO
     return max(0, int(raw))
 
 

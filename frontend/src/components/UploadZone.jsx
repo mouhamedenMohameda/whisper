@@ -189,7 +189,7 @@ function UploadZone({
   }, [files, durations, disabled, onFilesChange]);
 
   const addFiles = (list) => {
-    const arr = Array.from(list || []);
+    const arr = Array.from(list || []).slice(0, 1);
     const accepted = [];
     const rejected = [];
     for (const f of arr) {
@@ -208,7 +208,7 @@ function UploadZone({
         }),
       );
     }
-    if (accepted.length) onFilesChange([...files, ...accepted]);
+    if (accepted.length) onFilesChange(accepted);
   };
 
   const removeAt = (i) => {
@@ -303,7 +303,6 @@ function UploadZone({
           aria-label={t("upload.importAudio")}
           type="file"
           accept={ACCEPT}
-          multiple
           disabled={disabled}
           className="absolute inset-0 z-10 cursor-pointer opacity-0 disabled:cursor-not-allowed"
           onChange={(e) => addFiles(e.target.files)}
