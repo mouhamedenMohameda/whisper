@@ -650,11 +650,29 @@ export async function generateLesson(transcript, subject, transcriptMixedView, a
   if (transcriptMixedView && typeof transcriptMixedView === "object") {
     body.transcript_mixed_view = transcriptMixedView;
   }
-  const res = await fetch(apiUrl("/api/generate"), {
-    method: "POST",
-    headers: getAuthHeaders(true),
-    body: JSON.stringify(body),
-  });
+
+  // BUG 8 — Timeout de 6 minutes pour éviter une coupure silencieuse du navigateur
+  // sur les transcriptions longues avec map-reduce (plusieurs appels Groq séquentiels).
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 6 * 60 * 1000);
+
+  let res;
+  try {
+    res = await fetch(apiUrl("/api/generate"), {
+      method: "POST",
+      headers: getAuthHeaders(true),
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err?.name === "AbortError") {
+      throw new Error("La génération a pris trop de temps (> 6 min). Réessaie avec une transcription plus courte ou relance.");
+    }
+    throw err;
+  }
+  clearTimeout(timeoutId);
+
   const { ok, data, errorMessage } = await parseJsonResponse(res);
   if (!ok) throw new Error(errorMessage || "Génération impossible.");
   return data;

@@ -39,6 +39,7 @@ class ExportRequest(BaseModel):
     lesson: str
     subject: str = "Lecture"
     filename: str = "lesson"
+    language: str = "fr"  # 'fr' or 'ar'
 
 
 def strip_markdown(text: str) -> str:
@@ -149,15 +150,20 @@ async def export_pdf(
     )
     story.append(Spacer(1, 0.3 * cm))
 
-    title_match = re.search(r"##\s*1\.\s*TITLE\s*\n\s*(.+)", req.lesson, re.MULTILINE)
+    is_ar = req.language.lower().startswith("ar")
+    label_subject = "المادة" if is_ar else "Sujet"
+    label_gen = "تاريخ التوليد" if is_ar else "Généré le"
+    
+    # Titre dynamique (cherche le début de la section 1, peu importe la langue)
+    title_match = re.search(r"##\s*1\.\s*.*?\n\s*(.+)", req.lesson, re.MULTILINE)
     lesson_title = title_match.group(1).strip() if title_match else req.subject
 
     story.append(Paragraph(lesson_title.replace("&", "&amp;"), title_style))
     story.append(Spacer(1, 0.3 * cm))
-    story.append(Paragraph(f"Subject: {req.subject}", subtitle_style))
+    story.append(Paragraph(f"{label_subject}: {req.subject}", subtitle_style))
     story.append(
         Paragraph(
-            f"Generated: {datetime.now().strftime('%B %d, %Y')}",
+            f"{label_gen}: {datetime.now().strftime('%d/%m/%Y')}",
             subtitle_style,
         )
     )
@@ -179,6 +185,22 @@ async def export_pdf(
                 in_table = False
                 table_rows = []
             story.append(Paragraph(strip_markdown(line[3:]), h2_style))
+
+        elif line.startswith("# ") and not line.startswith("## "):
+            if in_table and table_rows:
+                _flush_table_pdf(story, table_rows, accent, light)
+                in_table = False
+                table_rows = []
+            # H1 : même style que H2 mais un peu plus grand
+            h1_style = ParagraphStyle(
+                "LH1",
+                fontSize=18,
+                textColor=accent,
+                spaceBefore=22,
+                spaceAfter=10,
+                fontName="Helvetica-Bold",
+            )
+            story.append(Paragraph(strip_markdown(line[2:]), h1_style))
 
         elif line.startswith("### "):
             if in_table and table_rows:
@@ -279,14 +301,18 @@ async def export_docx(
     run.font.size = Pt(11)
     run.font.bold = True
 
-    title_match = re.search(r"##\s*1\.\s*TITLE\s*\n\s*(.+)", req.lesson, re.MULTILINE)
+    is_ar = req.language.lower().startswith("ar")
+    label_subject = "المادة" if is_ar else "Sujet"
+    label_gen = "تاريخ التوليد" if is_ar else "Généré le"
+
+    title_match = re.search(r"##\s*1\.\s*.*?\n\s*(.+)", req.lesson, re.MULTILINE)
     lesson_title = title_match.group(1).strip() if title_match else req.subject
 
     h = doc.add_heading(lesson_title, 0)
     h.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     meta = doc.add_paragraph(
-        f"Subject: {req.subject}  |  {datetime.now().strftime('%B %d, %Y')}"
+        f"{label_subject}: {req.subject}  |  {label_gen}: {datetime.now().strftime('%d/%m/%Y')}"
     )
     meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
     meta.runs[0].font.color.rgb = RGBColor(107, 114, 128)
@@ -318,6 +344,9 @@ async def export_docx(
         if line.startswith("## "):
             flush_table()
             doc.add_heading(line[3:].strip(), level=1)
+        elif line.startswith("# ") and not line.startswith("## "):
+            flush_table()
+            doc.add_heading(line[2:].strip(), level=0)
         elif line.startswith("### "):
             flush_table()
             doc.add_heading(line[4:].strip(), level=2)

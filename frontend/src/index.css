@@ -186,4 +186,14 @@
       opacity: 0.35;
     }
   }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300/60 dark:bg-slate-700/60;
+  }
 }

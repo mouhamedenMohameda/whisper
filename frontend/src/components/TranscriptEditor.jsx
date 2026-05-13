@@ -17,6 +17,7 @@ export default function TranscriptEditor({
   durationMinutes = 0,
   primaryFileName,
   onExportTxt,
+  onGenerateCourse,
   usage = {},
   mixedView = null,
 }) {
@@ -165,7 +166,9 @@ export default function TranscriptEditor({
               <div className="flex gap-2 self-end sm:self-auto">
                 <button
                   type="button"
-                  className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white shadow-soft transition hover:brightness-105 active:translate-y-0.5 dark:bg-brand-500"
+                  onClick={onGenerateCourse}
+                  disabled={!onGenerateCourse}
+                  className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white shadow-soft transition hover:brightness-105 active:translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-brand-500"
                 >
                   {t("editor.heroBtn")}
                 </button>

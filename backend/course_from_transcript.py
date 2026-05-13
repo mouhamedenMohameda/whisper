@@ -395,6 +395,22 @@ def run_course_pipeline(
 
     if skip_col:
         skip_reason = "forced_env" if force_skip_col else "no_passage_meets_min_trusted_score"
+        if force_skip_col:
+            logger.info(
+                "run_course_pipeline: collage sauté (GENERATE_SKIP_COLLAGE=true) — "
+                "cours généré directement depuis le transcript brut."
+            )
+        else:
+            logger.warning(
+                "run_course_pipeline: collage sauté — aucun passage ASR n'atteint le score minimum "
+                "(max_score=%.1f < min_score=%.1f, passages=%d). "
+                "Qualité du cours potentiellement réduite. "
+                "Cause fréquente : Whisper local sans avg_logprob → score=0. "
+                "Ajuste GENERATE_MIN_WHISPER_RELIABILITY_SCORE ou force GENERATE_SKIP_COLLAGE=true.",
+                max_pass_score,
+                min_score,
+                len(passages_list),
+            )
         integrated = (transcript or "").strip()
         cin = cout = 0
     else:

@@ -291,6 +291,7 @@
     "sessionRestored": "Session restaurée depuis l'historique.",
     "entryDeleted": "Entrée supprimée.",
     "transcriptReady": "Transcription prête — corrige le texte si besoin. Synthèse ou cours : uniquement quand tu choisis.",
+    "lowQualityWarning": "Qualité ASR faible ({{score}}%). Le cours pourrait contenir des erreurs de transcription.",
     "uploadInterrupted": "Ton envoi s’est arrêté : garde cet onglet ouvert jusqu’à la fin, puis réessaie.",
     "transcribeFail": "La transcription n’a pas abouti. Réessaie ou choisis un autre fichier audio.",
     "textTooShort": "Le texte est encore trop court pour générer un cours complet.",
@@ -316,7 +317,8 @@
     "insightLoading": "Analyse…",
     "insightReadyToast": "Analyse prête.",
     "insightFail": "L’analyse n’a pas abouti. Réessaie plus tard.",
-    "insightTooShort": "Texte trop court pour l’analyse (environ 80 caractères minimum)."
+    "insightTooShort": "Texte trop court pour l’analyse (environ 80 caractères minimum).",
+    "lowQualityWarning": "⚠️ Fiabilité audio faible (score {{score}}/100) — le cours peut être imprécis. La génération continue quand même."
   },
   "notifications": {
     "title": "Notifications",
@@ -422,7 +424,12 @@
     "literalHint": "{{engine}} reste littéral : relis le bloc et corrige les noms, acronymes et découpures avant de lancer la génération du cours.",
     "copyTranscriptOk": "Transcript copié.",
     "source": "Source: {{name}}",
-    "emptyUnified": "Vue vide — réessaie la transcription."
+    "emptyUnified": "Vue vide — réessaie la transcription.",
+    "placeholder": "Texte de la transcription…",
+    "autoSaveHint": "Les modifications sont sauvegardées automatiquement dans l'historique.",
+    "heroTitle": "✨ Cours structuré avec {{course}}",
+    "heroSubtitle": "Génère glossaire, chapitres, quiz et fiches à partir du transcript — exportables en PDF et Word.",
+    "heroBtn": "Générer le cours"
   },
   "lesson": {
     "readyTitle": "Ton cours est prêt ! 🎉",

@@ -21,6 +21,8 @@ function Flashcard({
   onToggle,
   t,
 }) {
+  const faceBase = "absolute inset-0 flex flex-col rounded-2xl border p-5 text-start overflow-hidden [backface-visibility:hidden]";
+  
   return (
     <button
       type="button"
@@ -31,22 +33,36 @@ function Flashcard({
       <div
         className={`relative h-full w-full rounded-2xl transition-transform duration-700 [transform-style:preserve-3d] ${flipped ? "[transform:rotateY(180deg)]" : ""}`}
       >
-        <span className="pointer-events-none absolute end-4 top-3 z-10 text-[11px] text-slate-400">
-          {index + 1}/{total}
-        </span>
-        <div className="absolute inset-0 flex flex-col justify-center rounded-2xl border border-slate-200 bg-white p-5 text-start shadow-sm [backface-visibility:hidden] dark:border-slate-700 dark:bg-slate-900">
-          <span className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-brand-600 dark:text-brand-400">
+        {/* Front: Question */}
+        <div className={`${faceBase} border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900`}>
+          <span className="pointer-events-none absolute end-4 top-3 z-10 text-[11px] text-slate-400">
+            {index + 1}/{total}
+          </span>
+          <span className="mb-2 shrink-0 text-[10px] font-semibold uppercase tracking-widest text-brand-600 dark:text-brand-400">
             {t("flashcards.question")}
           </span>
-          <span className="text-start text-sm text-slate-900 dark:text-slate-100">{question}</span>
-          <span className="mt-4 text-xs text-slate-400">{t("flashcards.flipSee")}</span>
+          <div className="flex-1 flex flex-col justify-center overflow-hidden my-1">
+            <div className="overflow-y-auto pr-1 text-sm text-slate-900 dark:text-slate-100 custom-scrollbar">
+              {question}
+            </div>
+          </div>
+          <span className="mt-2 shrink-0 text-xs text-slate-400">{t("flashcards.flipSee")}</span>
         </div>
-        <div className="absolute inset-0 flex flex-col justify-center rounded-2xl border border-brand-600 bg-gradient-to-br from-brand-900/90 via-slate-900 to-slate-950 p-5 text-start shadow-lg [transform:rotateY(180deg)] [backface-visibility:hidden]">
-          <span className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-brand-200">
+
+        {/* Back: Answer */}
+        <div className={`${faceBase} border-brand-600 bg-gradient-to-br from-brand-900/90 via-slate-900 to-slate-950 shadow-lg [transform:rotateY(180deg)]`}>
+          <span className="pointer-events-none absolute end-4 top-3 z-10 text-[11px] text-white/40">
+            {index + 1}/{total}
+          </span>
+          <span className="mb-2 shrink-0 text-[10px] font-semibold uppercase tracking-widest text-brand-200">
             {t("flashcards.answer")}
           </span>
-          <span className="text-start text-sm text-white">{answer}</span>
-          <span className="mt-4 text-xs text-white/70">{t("flashcards.flipBack")}</span>
+          <div className="flex-1 flex flex-col justify-center overflow-hidden my-1">
+            <div className="overflow-y-auto pr-1 text-sm text-white custom-scrollbar">
+              {answer}
+            </div>
+          </div>
+          <span className="mt-2 shrink-0 text-xs text-white/70">{t("flashcards.flipBack")}</span>
         </div>
       </div>
     </button>

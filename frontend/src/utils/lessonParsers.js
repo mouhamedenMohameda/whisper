@@ -8,7 +8,8 @@ function isFlashcardsSectionTitle(t) {
 export function slugify(raw) {
   const s = String(raw || "")
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    // Évite \p{L} pour compatibilité maximale (SyntaxError possible sur vieux moteurs)
+    .replace(/[^a-z0-9\u00C0-\u017F\u0600-\u06FF]+/g, "-")
     .replace(/(^-|-$)/g, "");
   return s || "section";
 }
@@ -218,22 +219,22 @@ export function parseFlashcards(md) {
   };
 
   let m;
-  const sameLine = /\bQ\s*:\s*(.+?)\s*\/\s*A\s*:\s*(.+)/gi;
+  // 1) Q: ... / A: ... (même ligne avec slash)
+  const sameLine = /\bQ\s*:\s*(.+?)\s*[\/]\s*A\s*:\s*(.+?)(?=\s+(?:\d+\.\s*)?Q\s*:\s|\r?\n##|\r?\n\*\*(?:Card|Carte|Fiche)\s*\d+\*\*|$)/gi;
   while ((m = sameLine.exec(section)) !== null) {
     push(m[1], m[2]);
   }
 
-  const multiline =
-    /\*\*(?:Card|Carte|Fiche)\s*\d+\*\*[\s\r\n]*Q\s*:\s*([\s\S]+?)[\s\r\n]+A\s*:\s*([\s\S]+?)(?=\*\*(?:Card|Carte|Fiche)\s*\d+\*\*|\r?\n##|$)/gi;
-  while ((m = multiline.exec(section)) !== null) {
+  // 2) Q: ... A: ... (même ligne ou multiligne, sans slash obligatoire)
+  const flexible = /\bQ\s*:\s*([\s\S]+?)\s+\bA\s*:\s*([\s\S]+?)(?=\s+(?:\d+\.\s*)?Q\s*:\s|\r?\n##|\r?\n\*\*(?:Card|Carte|Fiche)\s*\d+\*\*|$)/gi;
+  while ((m = flexible.exec(section)) !== null) {
     push(m[1], m[2]);
   }
 
-  const loose = /\bQ\s*:\s*([\s\S]+?)\r?\n+\s*A\s*:\s*([\s\S]+?)(?=\r?\n\s*Q\s*:\s|\r?\n##|\r?\n\*\*(?:Card|Carte|Fiche)\s*\d+\*\*|$)/gi;
-  if (cards.length < 12) {
-    while ((m = loose.exec(section)) !== null) {
-      push(m[1], m[2]);
-    }
+  const multiline =
+    /\*\*(?:Card|Carte|Fiche)\s*\d+\*\*[\s\r\n]*Q\s*:\s*([\s\S]+?)[\s\r\n]+A\s*:\s*([\s\S]+?)(?=\*\*(?:Card|Carte|Fiche)\s*\d+\*\*|\s+(?:\d+\.\s*)?Q\s*:\s|\r?\n##|$)/gi;
+  while ((m = multiline.exec(section)) !== null) {
+    push(m[1], m[2]);
   }
 
   return cards;

@@ -22,47 +22,113 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-LESSON_SYSTEM_PROMPT = """You are an expert university tutor. A student recorded their professor's lecture and needs it transformed into a complete, clear, well-structured course they can study from.
+def get_localized_lesson_system_prompt(target_lang: str) -> str:
+    is_ar = target_lang == "ar"
+    
+    # Titres des sections
+    h1 = "1. العنوان" if is_ar else "1. TITRE"
+    h2 = "2. مقدمة" if is_ar else "2. INTRODUCTION"
+    h3 = "3. مسرد المفاهيم الأساسية" if is_ar else "3. GLOSSAIRE DES CONCEPTS CLÉS"
+    h4 = "4. محتوى الدرس" if is_ar else "4. CORPS DU COURS"
+    h5 = "5. جدول ملخص" if is_ar else "5. TABLEAU RÉCAPITULATIF"
+    h6 = "6. اختبار تدريبي" if is_ar else "6. QUIZ D'ENTRAÎNEMENT"
+    h7 = "7. بطاقات استذكار" if is_ar else "7. FLASHCARDS"
+    h8 = "8. مواضيع للمراجعة اللاحقة" if is_ar else "8. SUJETS À RÉVISER ENSUITE"
+
+    prompt = f"""You are an expert university tutor. A student recorded their professor's lecture and needs it transformed into a complete, clear, well-structured course they can study from.
 
 Given the transcript below, produce a lesson with these sections:
 
-## 1. TITLE
-   A clear, engaging title for this lesson.
+## {h1}
+   {"عنوان واضح وجذاب لهذا الدرس." if is_ar else "Un titre clair et engageant pour cette leçon."}
 
-## 2. INTRODUCTION (3-4 sentences)
-   Set the context: what is this lesson about and why does it matter?
+## {h2} (3-4 {"جمل" if is_ar else "phrases"})
+   {"ضع السياق: ما هو موضوع هذا الدرس ولماذا هو مهم؟" if is_ar else "Mettez en contexte : de quoi parle cette leçon et pourquoi est-elle importante ?"}
 
-## 3. KEY CONCEPTS GLOSSARY
-   List every important term mentioned, with a simple 1-line definition.
-   Format: **Term** — definition
+## {h3}
+   {"قم بإدراج كل مصطلح مهم تم ذكره، مع تعريف بسيط من سطر واحد." if is_ar else "Listez chaque terme important mentionné, avec une définition simple en une ligne."}
+   {"التنسيق" if is_ar else "Format"} : **{"مصطلح" if is_ar else "Terme"}** — {"تعريف" if is_ar else "définition"}
 
-## 4. LESSON BODY (main section)
-   Divide the content into logical chapters/sections.
-   For each section:
-   - A clear heading
-   - An explanation in simple, student-friendly language
-     (re-explain what the professor said more clearly if needed)
-   - A concrete real-world example to illustrate the concept
-   - A "⚠️ Common mistake" box if relevant
+## {h4} ({"القسم الرئيسي" if is_ar else "section principale"})
+   {"قسم المحتوى إلى فصول/أقسام منطقية." if is_ar else "Divisez le contenu en chapitres/sections logiques."}
+   {"لكل قسم" if is_ar else "Pour chaque section"} :
+   - {"عنوان واضح" if is_ar else "Un titre clair"}
+   - {"شرح بلغة بسيطة وسهلة للطالب" if is_ar else "Une explication dans un langage simple et adapté à l'étudiant"}
+     ({"أعد شرح ما قاله الأستاذ بشكل أوضح إذا لزم الأمر" if is_ar else "(ré-expliquez ce que le professeur a dit plus clairement si nécessaire)"})
+   - {"مثال واقعي ملموس لتوضيح المفهوم" if is_ar else "Un exemple concret du monde réel pour illustrer le concept"}
+   - {"مربع '⚠️ خطأ شائع' إذا كان ذلك مناسبًا" if is_ar else "Un encadré '⚠️ Erreur commune' si pertinent"}
 
-## 5. SUMMARY TABLE
-   A markdown table with 2 columns: Concept | What to remember
+## {h5}
+   {"جدول ماركداون من عمودين" if is_ar else "Un tableau markdown avec 2 colonnes"} : {"المفهوم" if is_ar else "Concept"} | {"ما يجب تذكره" if is_ar else "Ce qu'il faut retenir"}
 
-## 6. PRACTICE QUIZ (5 questions)
-   5 multiple-choice questions with 4 options each.
-   Mark the correct answer with ✅
-   Add a 1-sentence explanation for each answer.
+## {h6} (5 {"أسئلة" if is_ar else "questions"})
+   {"5 أسئلة متعددة الخيارات مع 4 خيارات لكل منها." if is_ar else "5 questions à choix multiples avec 4 options chacune."}
+   {"حدد الإجابة الصحيحة بـ" if is_ar else "Marquez la réponse correcte avec"} ✅
+   {"أضف شرحًا من جملة واحدة لكل إجابة." if is_ar else "Ajoutez une explication d'une phrase pour chaque réponse."}
 
-## 7. FLASHCARDS (10 cards)
-   Format: Q: [question] / A: [answer]
-   Cover the most important points from the lecture.
+## {h7} (10 {"بطاقات" if is_ar else "cartes"})
+   {"التنسيق" if is_ar else "Format"} : Q: [{"سؤال" if is_ar else "question"}] / A: [{"إجابة" if is_ar else "réponse"}]
+   {"غطي أهم النقاط من المحاضرة." if is_ar else "Couvrez les points les plus importants de la conférence."}
 
-## 8. WHAT TO REVIEW NEXT
-   3 topics the student should explore to go deeper.
+## {h8}
+   {"3 مواضيع يجب على الطالب استكشافها للتعمق أكثر." if is_ar else "3 sujets que l'étudiant devrait explorer pour approfondir."}
 
 Write in the language requested by the user when provided; otherwise, write in the same language as the transcript.
 Be clear, pedagogical, and student-friendly.
 Use markdown formatting throughout."""
+    return prompt
+
+
+# AMÉ 2 — Modifiers de prompt par matière pour adapter le ton, le format et les exemples.
+# Clé = fragment normalisé du champ "subject" (minuscules, sans accent).
+SUBJECT_MODIFIERS: dict[str, str] = {
+    "math": (
+        "When writing the lesson, include LaTeX-style formulas (using $...$ inline or $$...$$ for blocks) "
+        "wherever mathematics appears. Structure proofs and derivations step by step with numbered lines."
+    ),
+    "physique": (
+        "Include relevant physical formulas using $...$. Reference SI units and orders of magnitude. "
+        "Illustrate each concept with a concrete physical experiment or real-world application."
+    ),
+    "chimie": (
+        "Use standard chemical notation (molecular formulas, reaction equations with ⇌ arrows, state symbols). "
+        "Emphasise safety notes where relevant and include worked stoichiometry examples."
+    ),
+    "droit": (
+        "Reference legal articles, codes and jurisprudence mentioned in the lecture wherever applicable. "
+        "Structure the lesson around legal definitions, principles, exceptions and case examples."
+    ),
+    "histoire": (
+        "Include a concise chronological timeline (markdown table: Date | Event) covering the key dates "
+        "from the lecture. Contextualise events politically, economically and socially."
+    ),
+    "economie": (
+        "Represent economic relationships with simple graphs described in text (e.g. supply/demand). "
+        "Always ground abstract models in real-world data or policy examples."
+    ),
+    "informatique": (
+        "Include representative code snippets (fenced code blocks with language tags) to illustrate algorithms. "
+        "Use Big-O notation when discussing complexity. Prefer concrete runnable examples."
+    ),
+    "medecine": (
+        "Use standard medical terminology but always add a plain-language parenthetical explanation. "
+        "Structure clinical content around: étiology, pathophysiology, clinical signs, diagnosis, treatment."
+    ),
+    "biologie": (
+        "Use proper scientific nomenclature (genus *Italicised*). "
+        "Connect molecular mechanisms to cellular and organism-level outcomes whenever possible."
+    ),
+}
+
+
+def _subject_modifier(subject: str) -> str:
+    """Retourne un modificateur de prompt adapté au champ 'subject', ou chaîne vide si aucun match."""
+    normalized = subject.lower()
+    for key, modifier in SUBJECT_MODIFIERS.items():
+        if key in normalized:
+            return modifier
+    return ""
+
 
 
 class GenerateRequest(BaseModel):
@@ -108,13 +174,22 @@ async def generate_lesson(
     target_lang = "ar" if (req.language or "").strip().lower().startswith("ar") else "fr"
     lang_name = "Arabic" if target_lang == "ar" else "French"
     expl_label = "تفسير" if target_lang == "ar" else "Explication"
-    lesson_system_prompt = (
-        LESSON_SYSTEM_PROMPT
-        + f"\n\nIMPORTANT: Write the entire lesson in {lang_name} (no English). "
+    
+    # AMÉ : Prompt localisé selon la langue cible
+    lesson_system_prompt = get_localized_lesson_system_prompt(target_lang)
+    
+    lesson_system_prompt += (
+        f"\n\nIMPORTANT: Write the entire lesson in {lang_name} (no English). "
         + "For the quiz section, keep options labeled exactly A) B) C) D) (Latin letters), "
         + "mark the correct choice with ✅, and prefix each answer explanation with "
         + f"'{expl_label}:'."
     )
+
+    # AMÉ 2 — Injecter le modificateur de prompt selon la matière
+    subject_mod = _subject_modifier(req.subject or "")
+    if subject_mod:
+        lesson_system_prompt += f"\n\nSUBJECT-SPECIFIC INSTRUCTIONS: {subject_mod}"
+        logger.debug("/api/generate: subject modifier applied for subject=%r", req.subject)
 
     try:
         lesson_markdown, inp, out, pipeline_meta = run_course_pipeline(

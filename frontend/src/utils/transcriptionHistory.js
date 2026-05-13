@@ -122,7 +122,17 @@ function persist(entries) {
       });
       localStorage.setItem(STORAGE_KEY, JSON.stringify(skinny));
     } catch {
-      /* abandon silencieux */
+      // Échec total : avertir l'utilisateur via un toast (le UI doit écouter l'event).
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("lecturai-toast", {
+            detail: {
+              msg: "Le stockage local est plein — l'historique n'a pas pu être sauvegardé. Supprime des entrées anciennes ou libère de l'espace dans ton navigateur.",
+              type: "error",
+            },
+          }),
+        );
+      }
     }
   }
 }

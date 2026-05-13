@@ -95,11 +95,22 @@ export default function LessonViewer({
   const headings = extractNavHeadings(lessonMd);
   const u = usage || {};
   const transcriptTok = estimateTokensFromText(transcript);
-  const courseGenMru = Number(u.groqLessonBilledMru ?? u.claudeBilledMru ?? 0);
-  const insightOptMru = Number(u.groqInsightOptionalBilledMru ?? 0);
-  const totalMru = Number(u.whisperBilledMru ?? 0) + courseGenMru + insightOptMru;
-  const splitLesson = useMemo(() => allocateLessonBilledMru(lessonMd, courseGenMru), [lessonMd, courseGenMru]);
-  const mruTranscriptTab = Number(u.whisperBilledMru ?? 0) + insightOptMru;
+  let splitLesson = { cours: 0, quiz: 0, fiches: 0 };
+  let courseGenMru = 0;
+  let insightOptMru = 0;
+  let totalMru = 0;
+  let mruTranscriptTab = 0;
+
+  try {
+    courseGenMru = Number(u.groqLessonBilledMru ?? u.claudeBilledMru ?? 0);
+    insightOptMru = Number(u.groqInsightOptionalBilledMru ?? 0);
+    totalMru = (Number(u.whisperBilledMru ?? 0) || 0) + courseGenMru + insightOptMru;
+    splitLesson = allocateLessonBilledMru(lessonMd, courseGenMru);
+    mruTranscriptTab = (Number(u.whisperBilledMru ?? 0) || 0) + insightOptMru;
+  } catch (e) {
+    console.error("LessonViewer allocation error", e);
+  }
+
   const mruCoursTab = splitLesson.cours;
   const mruQuizTab = splitLesson.quiz;
   const mruFichesTab = splitLesson.fiches;
@@ -151,7 +162,7 @@ export default function LessonViewer({
           <div className="font-display text-xl font-bold text-emerald-900 dark:text-emerald-100">{t("lesson.readyTitle")}</div>
           <p className="mt-1 text-sm leading-relaxed text-emerald-900/85 dark:text-emerald-200/90">{t("lesson.readySub")}</p>
         </div>
-        <ExportButtons lesson={lessonMd} subject={subject} filename={filename} disabled={false} />
+        <ExportButtons lesson={lessonMd} subject={subject} filename={filename} language={language} disabled={false} />
       </div>
 
       <div className="glass-panel rounded-3xl p-5 text-sm shadow-soft">

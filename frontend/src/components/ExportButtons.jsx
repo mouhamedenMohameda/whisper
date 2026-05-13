@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { downloadExport } from "../utils/api";
 
-export default function ExportButtons({ lesson, subject, filename, disabled }) {
+export default function ExportButtons({ lesson, subject, filename, language, disabled }) {
   const { t } = useTranslation();
   const base = filename || "lecture";
 
@@ -14,7 +14,7 @@ export default function ExportButtons({ lesson, subject, filename, disabled }) {
       );
       await downloadExport(
         kind,
-        { lesson, subject: subject || "Lesson", filename: base },
+        { lesson, subject: subject || "Lesson", filename: base, language: language || "fr" },
         `${base}_lesson.${kind === "pdf" ? "pdf" : "docx"}`,
       );
       window.dispatchEvent(

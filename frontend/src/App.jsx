@@ -1385,10 +1385,6 @@ export default function App() {
         groqCompTot += Number(su.groq_insight_completion_tokens ?? 0);
         
         // Capture des infos moteur / tarif
-        const engineId = data.transcription_engine || su.transcription_engine;
-        const engineRate = su.retail_mru_per_hour_applied;
-        
-        console.log("[DEBUG] Transcribe Data:", { engineId, engineRate, su });
 
         if (data.groq_transcript_truncated) groqTruncAny = true;
         if (data.groq_insight_applied) groqAppliedFlag = true;
@@ -1457,7 +1453,6 @@ export default function App() {
         transcriptionEngine: data?.transcription_engine || data?.usage?.transcription_engine,
         retailMruPerHourApplied: data?.usage?.retail_mru_per_hour_applied,
       };
-      console.log("[DEBUG] Usage Snapshot:", usageSnapshot);
       setSessionUsage(usageSnapshot);
 
       const hid = newHistoryId();
@@ -1576,7 +1571,24 @@ export default function App() {
     }
   };
 
+  /**
+   * Calcule le score moyen de fiabilité ASR (0–100) sur les passages annotés.
+   * Retourne null si aucun passage annoté n'est disponible.
+   */
+  const computeAvgReliabilityScore = (passages) => {
+    if (!Array.isArray(passages) || passages.length === 0) return null;
+    const scores = passages
+      .map((p) => {
+        const s = p?.reliability?.score_0_100;
+        return typeof s === "number" ? s : null;
+      })
+      .filter((s) => s !== null);
+    if (scores.length === 0) return null;
+    return scores.reduce((a, b) => a + b, 0) / scores.length;
+  };
+
   const startGeneration = async () => {
+    if (busy) return;
     if (!transcript.trim() || transcript.trim().length < 50) {
       window.dispatchEvent(
         new CustomEvent("lecturai-toast", {
@@ -1588,6 +1600,20 @@ export default function App() {
       );
       return;
     }
+
+    // AMÉ 6 — Détection de qualité avant génération
+    const avgScore = computeAvgReliabilityScore(asrPassagesAnnotated);
+    if (avgScore !== null && avgScore < 55) {
+      window.dispatchEvent(
+        new CustomEvent("lecturai-toast", {
+          detail: {
+            msg: t("app.lowQualityWarning", { score: Math.round(avgScore) }),
+            type: "info",
+          },
+        }),
+      );
+    }
+
     setPhase("generating");
     void import("./components/LessonViewer.jsx").catch(() => {});
     try {
@@ -1603,13 +1629,8 @@ export default function App() {
       const cout = gu.groq_output_tokens ?? result.output_tokens ?? 0;
       const cmru = Number(gu.billed_mru_groq ?? 0);
 
-      const wcLesson = transcript.trim()
-        ? transcript.trim().split(/\s+/).filter(Boolean).length
-        : 0;
-
       const lessonStr = normalizeLessonMarkdown(result?.lesson);
       setLesson(lessonStr);
-      setWordCount(wcLesson);
 
       setSessionUsage((prev) => ({
         ...prev,
@@ -1621,9 +1642,10 @@ export default function App() {
       if (currentHistoryId) {
         updateEntry(currentHistoryId, {
           transcript,
+          transcriptMixedView,
           subject,
           language,
-          wordCount: wcLesson,
+          wordCount,
           lesson: lessonStr,
           durationMinutes,
           asrPassagesAnnotated,
@@ -2141,6 +2163,8 @@ export default function App() {
               durationMinutes={durationMinutes}
               primaryFileName={primaryName}
               onExportTxt={exportTxt}
+              onGenerateCourse={startGeneration}
+              busy={busy}
               usage={sessionUsage}
               mixedView={transcriptMixedView}
             />
@@ -2186,7 +2210,7 @@ export default function App() {
           <>
             <RouteErrorBoundary
               key={lessonViewBoundaryKey}
-              fallback={() => (
+              fallback={(error) => (
                 <div className="glass-panel mx-auto max-w-3xl space-y-4 rounded-3xl border border-rose-200/80 bg-rose-50/50 p-8 text-center shadow-soft dark:border-rose-900/50 dark:bg-rose-950/25">
                   <h2 className="font-display text-xl font-bold text-rose-950 dark:text-rose-100">
                     {t("lesson.renderErrorTitle")}
@@ -2194,6 +2218,9 @@ export default function App() {
                   <p className="text-sm leading-relaxed text-rose-900/90 dark:text-rose-200/90">
                     {t("lesson.renderErrorBody")}
                   </p>
+                  <pre className="mx-auto max-w-full overflow-auto rounded-xl bg-white/50 p-3 text-[10px] text-rose-800 dark:bg-black/20 dark:text-rose-300">
+                    {error?.message || String(error)}
+                  </pre>
                   <button
                     type="button"
                     onClick={() => {
