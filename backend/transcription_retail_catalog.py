@@ -94,20 +94,11 @@ RETAIL_MODELS: dict[str, TranscriptionRetailModel] = {
         label_fr="Excellence audio",
         label_ar="جودة فائقة",
     ),
-    "local": TranscriptionRetailModel(
-        id="local",
-        provider="local",
-        api_model="local",
-        mru_nouveau=2.0,
-        mru_regular=1.5,
-        mru_loyal=1.0,
-        cost_mru_per_hour=0.0,
-        label_fr="Atelier privé (économique)",
-        label_ar="ورشة خاصة (اقتصادي)",
-    ),
 }
 
 # Entrées utilisateur / legacy → id canonique dans ``RETAIL_MODELS``.
+# Le moteur "local" (Whisper CPU) a été retiré du catalogue : trop lent sur audio long et marge nulle.
+# Les anciens alias sont mappés vers ``whisper-large-v3-turbo`` (turbo) pour ne pas casser les workflows existants.
 ENGINE_ALIASES: dict[str, str] = {
     "openai": "whisper-1",
     "whisper": "whisper-1",
@@ -117,9 +108,12 @@ ENGINE_ALIASES: dict[str, str] = {
     "large-v3": "whisper-large-v3",
     "gpt4o_mini": "gpt-4o-mini-transcribe",
     "gpt4o-mini-transcribe": "gpt-4o-mini-transcribe",
-    "local_whisper": "local",
-    "offline": "local",
-    "cpu": "local",
+    # Anciens alias "local" → on rebascule sur turbo pour continuité.
+    "local": "whisper-large-v3-turbo",
+    "local_whisper": "whisper-large-v3-turbo",
+    "offline": "whisper-large-v3-turbo",
+    "cpu": "whisper-large-v3-turbo",
+    "eco": "whisper-large-v3-turbo",
 }
 
 
@@ -188,7 +182,7 @@ def retail_mru_for_audio(
 def public_catalog_entries() -> list[dict]:
     """Sérialisation stable pour ``/api/credits/transcription-retail``."""
     out: list[dict] = []
-    for mid in sorted(RETAIL_MODELS.keys(), key=lambda x: (RETAIL_MODELS[x].provider != "local", x)):
+    for mid in sorted(RETAIL_MODELS.keys()):
         s = RETAIL_MODELS[mid]
         out.append(
             {

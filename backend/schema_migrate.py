@@ -247,6 +247,162 @@ def ensure_chat_schema(engine: Engine) -> None:
             cols.add("wallet_balance_units_after")
 
 
+def ensure_referrals_schema(engine: Engine) -> None:
+    """Ajoute ``users.referral_code`` / ``referred_by_user_id`` / ``has_paid_topup`` + table ``referral_events`` si absents.
+
+    Backfill : génère un ``referral_code`` pour tout user existant qui n'en a pas (utilise ``referrals.generate_unique_code``).
+    """
+    insp = inspect(engine)
+    dialect = engine.dialect.name
+    tables = insp.get_table_names()
+
+    if "users" in tables:
+        cols = {c["name"] for c in insp.get_columns("users")}
+        with engine.begin() as conn:
+            if "referral_code" not in cols:
+                if dialect == "postgresql":
+                    conn.execute(text("ALTER TABLE users ADD COLUMN referral_code VARCHAR(16)"))
+                else:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN referral_code VARCHAR(16)"))
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_referral_code ON users(referral_code)"))
+            if "referred_by_user_id" not in cols:
+                if dialect == "postgresql":
+                    conn.execute(text("ALTER TABLE users ADD COLUMN referred_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL"))
+                else:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN referred_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_referred_by_user_id ON users(referred_by_user_id)"))
+            if "has_paid_topup" not in cols:
+                if dialect == "postgresql":
+                    conn.execute(text("ALTER TABLE users ADD COLUMN has_paid_topup BOOLEAN NOT NULL DEFAULT FALSE"))
+                else:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN has_paid_topup INTEGER NOT NULL DEFAULT 0"))
+
+    tables = inspect(engine).get_table_names()
+    if "referral_events" not in tables:
+        with engine.begin() as conn:
+            if dialect == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE referral_events (
+                            id SERIAL PRIMARY KEY,
+                            referrer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                            referred_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                            kind VARCHAR(40) NOT NULL,
+                            referrer_bonus_units INTEGER NOT NULL DEFAULT 0,
+                            referred_bonus_units INTEGER NOT NULL DEFAULT 0,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            CONSTRAINT uq_referral_events_user_kind UNIQUE (referred_user_id, kind)
+                        )
+                        """
+                    )
+                )
+            else:
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE referral_events (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            referrer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                            referred_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                            kind VARCHAR(40) NOT NULL,
+                            referrer_bonus_units INTEGER NOT NULL DEFAULT 0,
+                            referred_bonus_units INTEGER NOT NULL DEFAULT 0,
+                            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            UNIQUE (referred_user_id, kind)
+                        )
+                        """
+                    )
+                )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_referral_events_referrer ON referral_events(referrer_user_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_referral_events_referred ON referral_events(referred_user_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_referral_events_kind ON referral_events(kind)"))
+
+    # Backfill : codes manquants sur users existants (import paresseux pour éviter cycle d'imports).
+    try:
+        from database import SessionLocal
+        from referrals import backfill_missing_referral_codes
+
+        db = SessionLocal()
+        try:
+            backfill_missing_referral_codes(db)
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("Backfill referral_code a échoué — sans bloquer le démarrage.")
+
+
+def ensure_whatsapp_source_schema(engine: Engine) -> None:
+    """Ajoute ``source`` / ``whatsapp_phone`` / ``whatsapp_message_id`` sur ``transcription_jobs`` si absents.
+
+    Ajoute aussi ``users.whatsapp_transcription_model`` (modèle de transcription préféré du user pour le bot).
+    """
+    insp = inspect(engine)
+    dialect = engine.dialect.name
+    tables = insp.get_table_names()
+    if "transcription_jobs" not in tables:
+        return
+
+    cols = {c["name"] for c in insp.get_columns("transcription_jobs")}
+    with engine.begin() as conn:
+        if "source" not in cols:
+            conn.execute(text("ALTER TABLE transcription_jobs ADD COLUMN source VARCHAR(24) NOT NULL DEFAULT 'web'"))
+        if "whatsapp_phone" not in cols:
+            conn.execute(text("ALTER TABLE transcription_jobs ADD COLUMN whatsapp_phone VARCHAR(32)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_transcription_jobs_whatsapp_phone ON transcription_jobs(whatsapp_phone)"))
+        if "whatsapp_message_id" not in cols:
+            conn.execute(text("ALTER TABLE transcription_jobs ADD COLUMN whatsapp_message_id VARCHAR(128)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_transcription_jobs_whatsapp_message_id ON transcription_jobs(whatsapp_message_id)"))
+        # Index UNIQUE partiel : verrouille l'idempotence côté DB (les NULLs sont autorisés en doublon).
+        # SQLite ≥ 3.8 et PostgreSQL supportent la clause WHERE sur CREATE UNIQUE INDEX.
+        try:
+            if dialect in ("sqlite", "postgresql"):
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_transcription_jobs_whatsapp_message_id "
+                    "ON transcription_jobs(whatsapp_message_id) WHERE whatsapp_message_id IS NOT NULL"
+                ))
+        except Exception:
+            logger.exception("Impossible de créer l'index UNIQUE whatsapp_message_id — idempotence dégradée.")
+
+    if "users" in tables:
+        user_cols = {c["name"] for c in insp.get_columns("users")}
+        with engine.begin() as conn:
+            if "whatsapp_transcription_model" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN whatsapp_transcription_model VARCHAR(48)"))
+            if "whatsapp_subject" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN whatsapp_subject VARCHAR(128)"))
+            if "whatsapp_language" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN whatsapp_language VARCHAR(8)"))
+            # Migration : le moteur "local" (eco) a été retiré du catalogue → on remet à NULL les
+            # préférences obsolètes pour que le défaut s'applique automatiquement au prochain audio.
+            conn.execute(text(
+                "UPDATE users SET whatsapp_transcription_model = NULL "
+                "WHERE whatsapp_transcription_model = 'local'"
+            ))
+
+
+def ensure_public_share_schema(engine: Engine) -> None:
+    """Ajoute ``transcription_jobs.public_share_token`` et compteurs si absents (idempotent)."""
+    insp = inspect(engine)
+    dialect = engine.dialect.name
+    tables = insp.get_table_names()
+    if "transcription_jobs" not in tables:
+        return
+
+    cols = {c["name"] for c in insp.get_columns("transcription_jobs")}
+    with engine.begin() as conn:
+        if "public_share_token" not in cols:
+            conn.execute(text("ALTER TABLE transcription_jobs ADD COLUMN public_share_token VARCHAR(64)"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_transcription_jobs_public_share_token ON transcription_jobs(public_share_token)"))
+        if "public_share_enabled_at" not in cols:
+            if dialect == "postgresql":
+                conn.execute(text("ALTER TABLE transcription_jobs ADD COLUMN public_share_enabled_at TIMESTAMPTZ"))
+            else:
+                conn.execute(text("ALTER TABLE transcription_jobs ADD COLUMN public_share_enabled_at TIMESTAMP"))
+        if "public_share_views" not in cols:
+            conn.execute(text("ALTER TABLE transcription_jobs ADD COLUMN public_share_views INTEGER NOT NULL DEFAULT 0"))
+
+
 def ensure_user_transcription_model_hours_schema(engine: Engine) -> None:
     """Crée ``user_transcription_model_hours`` si besoin ; backfill legacy au plus une fois (drapeau SQL)."""
     insp = inspect(engine)

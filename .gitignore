@@ -10,3 +10,9 @@ frontend/dist/
 *.m4a
 *.mp3
 *.wav
+
+# Secrets and temporary files
+tokenfbesYes
+.env
+*.pem
+*.key

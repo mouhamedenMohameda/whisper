@@ -53,6 +53,24 @@ class User(Base):
         comment="Somme des heures par modèle (dénormalisé ; paliers = user_transcription_model_hours).",
     )
 
+    # Parrainage : code public unique généré au signup (8 chars alphanum sans 0/O/I/1 pour lisibilité).
+    referral_code: Mapped[Optional[str]] = mapped_column(String(16), unique=True, index=True, nullable=True)
+    referred_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # Bascule à True après la 1ère recharge approuvée — déclenche le gros bonus au parrain (anti-fraude).
+    has_paid_topup: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false(), default=False)
+
+    # Modèle de transcription préféré pour le bot WhatsApp (id canonique de transcription_retail_catalog).
+    # NULL = pas encore choisi → on utilise le défaut côté processor (whisper-large-v3-turbo).
+    whatsapp_transcription_model: Mapped[Optional[str]] = mapped_column(String(48), nullable=True, default=None)
+
+    # Matière préférée pour les fiches générées via WhatsApp (libellé libre, ex. "Mathématiques").
+    # NULL = auto-détecté à partir du transcript ou "Général" par défaut.
+    whatsapp_subject: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, default=None)
+    # Langue préférée pour l'UI WhatsApp ("fr" ou "ar"). NULL = devinée via dernier job / défaut env.
+    whatsapp_language: Mapped[Optional[str]] = mapped_column(String(8), nullable=True, default=None)
+
     transcription_model_hours: Mapped[list["UserTranscriptionModelHours"]] = relationship(
         "UserTranscriptionModelHours",
         back_populates="user",
@@ -146,6 +164,12 @@ class TranscriptionJob(Base):
     transcription_engine: Mapped[str] = mapped_column(String(24), nullable=False, server_default="openai")
     input_relpath: Mapped[str] = mapped_column(String(512), nullable=False)
     client_content_type: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    # Origine du job : "web" (UI standard) ou "whatsapp" (bot conversationnel — déclenche send PDF au numéro).
+    source: Mapped[str] = mapped_column(String(24), nullable=False, server_default="web", default="web")
+    # Numéro WhatsApp E.164 où renvoyer le PDF si source="whatsapp" (sinon NULL).
+    whatsapp_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    # ID du message WhatsApp entrant qui a déclenché ce job (debug, audit, dédoublonnage côté Meta).
+    whatsapp_message_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
 
     status: Mapped[str] = mapped_column(String(24), nullable=False, index=True, server_default="queued")
     progress_percent: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
@@ -156,6 +180,10 @@ class TranscriptionJob(Base):
     result_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     lesson_markdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Partage public d'une leçon : si non null, la leçon est consultable sans auth via /c/<token>.
+    public_share_token: Mapped[Optional[str]] = mapped_column(String(64), unique=True, index=True, nullable=True)
+    public_share_enabled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    public_share_views: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
     # Réserve portefeuille (unités wallet) débitée au passage « queued → processing » si TRANSCRIBE_JOB_WALLET_HOLD ; libérée ou soldée au résultat.
     wallet_reserved_units: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
     # Heures (fractionnaires) déjà comptabilisées sur ``user_transcription_model_hours`` pour ce job ; NULL = pas encore appliqué.
@@ -253,3 +281,31 @@ class AppUserFeedback(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     ui_locale: Mapped[str] = mapped_column(String(16), nullable=False, server_default="fr")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ReferralEvent(Base):
+    """Trace d'un bonus parrainage attribué — audit + idempotence.
+
+    ``kind`` :
+      - ``signup``                   : petit bonus immédiat à l'inscription (parrain + filleul).
+      - ``first_paid_topup_approved``: gros bonus déclenché à la 1ère recharge approuvée du filleul.
+    """
+
+    __tablename__ = "referral_events"
+    __table_args__ = (
+        UniqueConstraint("referred_user_id", "kind", name="uq_referral_events_user_kind"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    referrer_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    referred_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    referrer_bonus_units: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
+    referred_bonus_units: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
