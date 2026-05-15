@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { ENGINE_TRANSCRIPTION } from "../branding.js";
 import ExportButtons from "./ExportButtons.jsx";
 import FlashcardDeck from "./FlashcardDeck.jsx";
+import LessonShareButton from "./LessonShareButton.jsx";
 import QuizModule from "./QuizModule.jsx";
 import TranscriptMixedView from "./TranscriptMixedView.jsx";
 import UsageDetailsToggle from "./UsageDetailsToggle.jsx";
@@ -89,6 +90,7 @@ export default function LessonViewer({
   durationMinutes,
   celebration,
   usage,
+  jobPublicId,
 }) {
   const { t } = useTranslation();
   const lessonMd = typeof lesson === "string" ? lesson : "";
@@ -162,7 +164,7 @@ export default function LessonViewer({
   return (
     <div className="space-y-6">
       <div
-        className={`glass-panel flex flex-col gap-5 rounded-3xl border border-emerald-200/70 bg-gradient-to-br from-emerald-50/90 via-white to-teal-50/40 p-5 shadow-soft dark:border-emerald-900/40 dark:from-emerald-950/50 dark:via-slate-900/80 dark:to-teal-950/20 lg:flex-row lg:items-center lg:justify-between ${
+        className={`glass-panel relative z-20 flex flex-col gap-5 rounded-3xl border border-emerald-200/70 bg-gradient-to-br from-emerald-50/90 via-white to-teal-50/40 p-5 shadow-soft dark:border-emerald-900/40 dark:from-emerald-950/50 dark:via-slate-900/80 dark:to-teal-950/20 lg:flex-row lg:items-center lg:justify-between ${
           celebration ? "animate-celebrate" : ""
         }`}
       >
@@ -170,13 +172,18 @@ export default function LessonViewer({
           <div className="font-display text-xl font-bold text-emerald-900 dark:text-emerald-100">{t("lesson.readyTitle")}</div>
           <p className="mt-1 text-sm leading-relaxed text-emerald-900/85 dark:text-emerald-200/90">{t("lesson.readySub")}</p>
         </div>
-        <ExportButtons 
-          lesson={exportMd} 
-          subject={activeTab === "quiz" ? `${subject} - Quiz` : activeTab === "flashcards" ? `${subject} - Fiches` : subject} 
-          filename={activeTab === "quiz" ? `${filename}_quiz` : activeTab === "flashcards" ? `${filename}_fiches` : filename} 
-          language={language} 
-          disabled={false} 
-        />
+        <div className="relative flex flex-wrap items-center gap-2">
+          <ExportButtons
+            lesson={exportMd}
+            subject={activeTab === "quiz" ? `${subject} - Quiz` : activeTab === "flashcards" ? `${subject} - Fiches` : subject}
+            filename={activeTab === "quiz" ? `${filename}_quiz` : activeTab === "flashcards" ? `${filename}_fiches` : filename}
+            language={language}
+            disabled={false}
+          />
+          {activeTab === "lesson" && jobPublicId ? (
+            <LessonShareButton jobPublicId={jobPublicId} subject={subject} />
+          ) : null}
+        </div>
       </div>
 
       <div className="glass-panel rounded-3xl p-5 text-sm shadow-soft">

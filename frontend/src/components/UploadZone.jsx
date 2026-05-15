@@ -115,8 +115,8 @@ function useEstimatedDurations(files) {
 
 /** Liste minimale si l’API catalogue est indisponible. */
 const FALLBACK_TRANSCRIPTION_MODELS = [
+  { id: "whisper-large-v3-turbo", label_fr: "Réponse express", label_ar: "سريع التسليم", provider: "groq" },
   { id: "whisper-1", label_fr: "Excellence audio", label_ar: "جودة فائقة", provider: "openai" },
-  { id: "local", label_fr: "Atelier privé (économique)", label_ar: "ورشة خاصة (اقتصادي)", provider: "local" },
 ];
 
 function UploadZone({

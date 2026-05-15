@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import i18n from "../i18n/index.js";
 import { apiUrl, parseJsonResponse } from "../utils/api.js";
 import { setAuthSession } from "../utils/authStorage.js";
+import { clearPendingReferralCode, getPendingReferralCode } from "../utils/referral.js";
 import WhatsAppSupportButton from "./WhatsAppSupportButton.jsx";
 
 function toast(msg, type = "info") {
@@ -96,8 +97,10 @@ function PasswordField({ label, hint, value, onChange, autoComplete, required, m
 
 export default function AuthScreen({ onAuthed }) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState("login");
+  const [tab, setTab] = useState(() => (getPendingReferralCode() ? "register" : "login"));
   const [busy, setBusy] = useState(false);
+  // Calculé au mount uniquement — pas besoin de réactivité (changement = page reload via lien).
+  const [pendingRefCode] = useState(() => getPendingReferralCode());
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -144,18 +147,23 @@ export default function AuthScreen({ onAuthed }) {
     if (!validateIdentityFields(regNni, regWa)) return;
     setBusy(true);
     try {
+      const pendingRef = getPendingReferralCode();
+      const payload = {
+        email: regEmail.trim(),
+        password: regPassword,
+        nni: regNni.trim(),
+        whatsapp: regWa.trim(),
+      };
+      if (pendingRef) payload.referral_code = pendingRef;
       const res = await fetch(apiUrl("/api/auth/register"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: regEmail.trim(),
-          password: regPassword,
-          nni: regNni.trim(),
-          whatsapp: regWa.trim(),
-        }),
+        body: JSON.stringify(payload),
       });
       const { ok, data, errorMessage } = await parseJsonResponse(res);
       if (!ok) throw new Error(errorMessage || t("auth.registerFail"));
+      // Inscription réussie → on purge le code (idempotence, sécurité pour un futur autre compte).
+      clearPendingReferralCode();
       setAuthSession(data.access_token, data.user);
       onAuthed?.(data);
       toast(t("auth.accountCreated"), "success");
@@ -252,6 +260,13 @@ export default function AuthScreen({ onAuthed }) {
 
         {tab === "register" && (
           <form onSubmit={submitRegister} className="mt-8 space-y-4">
+            {pendingRefCode ? (
+              <div className="rounded-2xl border border-emerald-300/60 bg-emerald-50/80 px-4 py-3 text-xs leading-relaxed text-emerald-900 dark:border-emerald-700/60 dark:bg-emerald-950/40 dark:text-emerald-100">
+                <span className="font-bold">🎁 {t("auth.refBannerTitle", "Tu es invité(e) par un ami")}</span>
+                <br />
+                {t("auth.refBannerBody", { code: pendingRefCode, defaultValue: "Code de parrainage actif : {{code}}. Vous gagnerez tous les deux un bonus de crédit à l'inscription." })}
+              </div>
+            ) : null}
             <Field label={t("auth.email")} type="email" autoComplete="email" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} required />
             <Field
               label={t("auth.nniLabel")}

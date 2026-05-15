@@ -6,6 +6,7 @@ import LanguageSwitcher from "./components/LanguageSwitcher.jsx";
 import TranscriptEditor from "./components/TranscriptEditor.jsx";
 import UploadZone from "./components/UploadZone.jsx";
 import RouteErrorBoundary from "./components/RouteErrorBoundary.jsx";
+import PublicLessonView, { publicShareTokenFromLocation } from "./components/PublicLessonView.jsx";
 import WhatsAppSupportButton from "./components/WhatsAppSupportButton.jsx";
 import TranscriptionRatingModal from "./components/TranscriptionRatingModal.jsx";
 import IdeaFeedbackModal from "./components/IdeaFeedbackModal.jsx";
@@ -27,6 +28,7 @@ import {
 } from "./utils/api.js";
 import { loadBgTranscribeJobIds, forgetBgTranscribeJobId, persistBgTranscribeJobId } from "./utils/bgTranscribeJobsStorage.js";
 import { clearAuthSession, getAuthProfile, getAuthToken, setAuthSession } from "./utils/authStorage.js";
+import { captureReferralFromUrl } from "./utils/referral.js";
 import { getEntry, loadHistory, prependEntry, removeEntry, updateEntry } from "./utils/transcriptionHistory.js";
 import { mergeTranscriptMixedViews } from "./utils/transcriptMixedView.js";
 import { userFacingTranscriptionJobFailure } from "./utils/transcribeUserMessages.js";
@@ -591,6 +593,13 @@ function GeneratingSkeleton() {
 export default function App() {
   const { t, i18n } = useTranslation();
   const [dark, setDark] = useDarkModeToggle();
+  // Détection au mount de la route publique `/c/<token>` — court-circuite tout le pipeline auth.
+  // Volontairement calculé une seule fois : changer de leçon = full reload (URL différente).
+  const [publicShareToken] = useState(() => publicShareTokenFromLocation());
+  // Capture `?ref=CODE` dans l'URL et le persiste pour l'inscription suivante (idempotent).
+  useEffect(() => {
+    captureReferralFromUrl();
+  }, []);
   const [authGate, setAuthGate] = useState({
     loading: true,
     skipped: false,
@@ -1726,6 +1735,17 @@ export default function App() {
     );
   };
 
+  // Route publique `/c/<token>` — court-circuite tout le pipeline auth / wallet / hooks lourds.
+  // Le visiteur peut ne pas être connecté ; on render directement la leçon partagée.
+  if (publicShareToken) {
+    return (
+      <div className="relative min-h-[100dvh] bg-gradient-to-b from-orange-50/70 via-white to-amber-50/40 text-slate-900 transition dark:from-slate-950 dark:via-slate-950 dark:to-orange-950/20 dark:text-slate-50">
+        <ToastPortal />
+        <PublicLessonView token={publicShareToken} />
+      </div>
+    );
+  }
+
   if (authGate.loading) {
     return (
       <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-gradient-to-b from-orange-50/90 via-amber-50/35 to-white dark:from-slate-950 dark:via-orange-950/15 dark:to-slate-950">
@@ -2279,6 +2299,7 @@ export default function App() {
                   durationMinutes={durationMinutes}
                   celebration={celebrate}
                   usage={sessionUsage}
+                  jobPublicId={Array.isArray(currentJobPublicIds) && currentJobPublicIds.length === 1 ? currentJobPublicIds[0] : null}
                 />
               </Suspense>
             </RouteErrorBoundary>

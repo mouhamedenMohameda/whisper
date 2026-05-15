@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Politique de confidentialité — LecturAI</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 760px; margin: 2rem auto; padding: 1rem 1.5rem; color: #1f2937; line-height: 1.6; }
+  h1 { color: #111827; border-bottom: 2px solid #e5e7eb; padding-bottom: 0.5rem; }
+  h2 { color: #1f2937; margin-top: 2rem; }
+  h3 { color: #374151; }
+  ul { padding-left: 1.5rem; }
+  a { color: #2563eb; }
+  .updated { color: #6b7280; font-size: 0.9rem; }
+  .contact { background: #f9fafb; padding: 1rem; border-radius: 8px; margin-top: 2rem; }
+</style>
+</head>
+<body>
+
+<h1>Politique de confidentialité — LecturAI</h1>
+<p class="updated">Dernière mise à jour : 14 mai 2026</p>
+
+<p>
+LecturAI ("nous", "notre service") est un outil éducatif qui transforme les enregistrements
+audio de cours en fiches de révision structurées (PDF). La présente politique décrit quelles
+données nous collectons, pourquoi, et comment vous pouvez exercer vos droits.
+</p>
+
+<h2>1. Qui est responsable du traitement</h2>
+<p>
+LecturAI, opéré par Mohameden Mouhameden, joignable à
+<a href="mailto:mohameda.mouhameden@gmail.com">mohameda.mouhameden@gmail.com</a>.
+</p>
+
+<h2>2. Données que nous collectons</h2>
+
+<h3>2.1 Données fournies directement par l'utilisateur</h3>
+<ul>
+  <li><strong>Compte</strong> : adresse e-mail, numéro NNI, numéro WhatsApp, mot de passe (haché).</li>
+  <li><strong>Fichiers audio</strong> : enregistrements de cours que vous envoyez via l'application web ou via le bot WhatsApp.</li>
+  <li><strong>Contenu généré</strong> : transcriptions, fiches de cours, échanges de chat liés à vos fichiers.</li>
+</ul>
+
+<h3>2.2 Données collectées via l'utilisation du bot WhatsApp</h3>
+<ul>
+  <li><strong>Numéro de téléphone WhatsApp</strong> : utilisé comme identifiant pour relier les messages à votre compte.</li>
+  <li><strong>Identifiants de messages Meta</strong> (wamid) : conservés pour assurer l'idempotence des traitements.</li>
+  <li><strong>Métadonnées des médias</strong> : type MIME, taille, horodatage.</li>
+</ul>
+
+<h3>2.3 Données techniques</h3>
+<ul>
+  <li>Adresse IP, en-têtes HTTP, journaux serveur (à des fins de sécurité et de diagnostic).</li>
+</ul>
+
+<h2>3. Finalités du traitement</h2>
+<ul>
+  <li>Fournir le service de transcription et de génération de fiches de cours.</li>
+  <li>Gérer votre compte, votre portefeuille de crédits MRU et l'historique des transcriptions.</li>
+  <li>Permettre la conversation via WhatsApp et l'envoi des PDFs générés.</li>
+  <li>Détecter les abus et garantir la sécurité du service.</li>
+  <li>Respecter nos obligations légales.</li>
+</ul>
+
+<h2>4. Sous-traitants et partenaires techniques</h2>
+<p>
+Pour faire fonctionner LecturAI, vos données peuvent être transmises aux services suivants,
+chacun ayant ses propres politiques de confidentialité :
+</p>
+<ul>
+  <li><strong>Meta Platforms (WhatsApp Business Cloud API)</strong> — transport des messages, des médias et des PDFs.</li>
+  <li><strong>OpenAI</strong> et <strong>Groq</strong> — transcription audio (Whisper, GPT-4o mini transcribe) et génération de cours par LLM.</li>
+  <li><strong>Hébergeur VPS</strong> — stockage de la base de données et des fichiers audio sur un serveur en Europe.</li>
+</ul>
+
+<h2>5. Durée de conservation</h2>
+<ul>
+  <li><strong>Compte et solde</strong> : tant que le compte est actif.</li>
+  <li><strong>Audios bruts</strong> : 30 jours après la génération, puis suppression automatique.</li>
+  <li><strong>Transcriptions et fiches</strong> : conservées tant que vous gardez un compte (vous pouvez supprimer chaque entrée individuellement).</li>
+  <li><strong>Journaux serveur</strong> : 90 jours maximum.</li>
+</ul>
+
+<h2>6. Vos droits</h2>
+<p>Conformément aux réglementations applicables, vous disposez des droits suivants :</p>
+<ul>
+  <li>Accéder à vos données personnelles.</li>
+  <li>Rectifier des informations erronées.</li>
+  <li>Supprimer votre compte et l'ensemble de vos données.</li>
+  <li>Vous opposer à certains traitements ou retirer votre consentement.</li>
+  <li>Exporter vos données dans un format lisible.</li>
+</ul>
+<p>
+Pour exercer ces droits, contactez-nous à
+<a href="mailto:mohameda.mouhameden@gmail.com">mohameda.mouhameden@gmail.com</a>.
+</p>
+
+<h2>7. Sécurité</h2>
+<p>
+Nous mettons en œuvre les mesures techniques et organisationnelles raisonnables pour protéger
+vos données : hachage des mots de passe (bcrypt), HTTPS sur l'ensemble du service, vérification
+de signature HMAC sur les webhooks WhatsApp, accès limité aux journaux.
+</p>
+
+<h2>8. Mineurs</h2>
+<p>
+Le service est destiné à un usage éducatif. Si vous êtes mineur, l'utilisation se fait sous la
+responsabilité d'un parent ou tuteur légal.
+</p>
+
+<h2>9. Modifications</h2>
+<p>
+Cette politique peut être mise à jour. La date de dernière mise à jour figure en haut de la page.
+Les utilisateurs sont invités à la consulter régulièrement.
+</p>
+
+<h2>10. Politique WhatsApp</h2>
+<p>
+En interagissant avec le bot LecturAI sur WhatsApp, vous acceptez également les
+<a href="https://www.whatsapp.com/legal/privacy-policy" target="_blank" rel="noopener">Conditions de WhatsApp</a>.
+Nous ne partageons jamais le contenu de vos messages avec des tiers à des fins commerciales.
+</p>
+
+<div class="contact">
+  <strong>Contact</strong><br>
+  Email : <a href="mailto:mohameda.mouhameden@gmail.com">mohameda.mouhameden@gmail.com</a><br>
+  Site : <a href="https://ai-whisper.radar-mr.com">ai-whisper.radar-mr.com</a>
+</div>
+
+<p style="margin-top:2rem;"><a href="/">← Retour à LecturAI</a></p>
+
+</body>
+</html>

@@ -43,7 +43,6 @@ export default function TranscriptEditor({
     "whisper-large-v3": "Profil équilibré",
     "gpt-4o-mini-transcribe": "Transcription affinée",
     "whisper-1": "Excellence audio",
-    "local": "Atelier privé (économique)",
   };
   const currentEngineLabel = engineLabels[usage?.transcriptionEngine] || usage?.transcriptionEngine || (usage?.transcriptionEngine ? "Moteur inconnu" : null);
   const currentRate = usage?.retailMruPerHourApplied;
