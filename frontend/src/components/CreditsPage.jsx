@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ENGINE_COURSE, ENGINE_TRANSCRIPTION } from "../branding.js";
 import { apiUrl, getAuthHeaders, parseJsonResponse } from "../utils/api.js";
 import { appLocaleTag } from "../utils/locale.js";
+import ReferralCard from "./ReferralCard.jsx";
 
 function toast(msg, type) {
   window.dispatchEvent(new CustomEvent("lecturai-toast", { detail: { msg, type } }));
@@ -514,6 +515,8 @@ export default function CreditsPage({ onBack, onWalletUpdated }) {
           )}
         </ul>
       </div>
+
+      <ReferralCard />
     </div>
   );
 }

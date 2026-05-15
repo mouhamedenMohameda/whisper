@@ -743,6 +743,56 @@ export async function estimatePremiumPdf(body) {
   return data;
 }
 
+/** Lit le code de parrainage + stats du compte connecté. */
+export async function fetchMyReferralInfo() {
+  const res = await fetch(apiUrl("/api/referrals/me"), { headers: getAuthHeaders(false) });
+  const { ok, data, errorMessage } = await parseJsonResponse(res);
+  if (!ok || !data) throw new Error(errorMessage || "Impossible de lire le code de parrainage.");
+  return data;
+}
+
+/**
+ * Active le partage public d'une leçon (idempotent : ré-appel = mêmes valeurs).
+ * @param {string} jobPublicId identifiant public du `transcription_jobs`
+ * @returns {Promise<{ token: string, url: string|null, views: number, enabled_at: string|null }>}
+ */
+export async function enableLessonShare(jobPublicId) {
+  const res = await fetch(apiUrl(`/api/lessons/${encodeURIComponent(jobPublicId)}/share`), {
+    method: "POST",
+    headers: getAuthHeaders(false),
+  });
+  const { ok, data, errorMessage } = await parseJsonResponse(res);
+  if (!ok || !data) throw new Error(errorMessage || "Partage impossible.");
+  return data;
+}
+
+export async function disableLessonShare(jobPublicId) {
+  const res = await fetch(apiUrl(`/api/lessons/${encodeURIComponent(jobPublicId)}/share`), {
+    method: "DELETE",
+    headers: getAuthHeaders(false),
+  });
+  const { ok, errorMessage } = await parseJsonResponse(res);
+  if (!ok) throw new Error(errorMessage || "Désactivation impossible.");
+  return true;
+}
+
+export async function fetchLessonShareStatus(jobPublicId) {
+  const res = await fetch(apiUrl(`/api/lessons/${encodeURIComponent(jobPublicId)}/share`), {
+    headers: getAuthHeaders(false),
+  });
+  const { ok, data, errorMessage } = await parseJsonResponse(res);
+  if (!ok || !data) throw new Error(errorMessage || "Statut indisponible.");
+  return data;
+}
+
+/** Route publique — pas d'auth. */
+export async function fetchPublicLesson(token) {
+  const res = await fetch(apiUrl(`/api/public/lesson/${encodeURIComponent(token)}`));
+  const { ok, data, errorMessage } = await parseJsonResponse(res);
+  if (!ok || !data) throw new Error(errorMessage || "Lien invalide ou expiré.");
+  return data;
+}
+
 export async function downloadPremiumPdf(body, downloadName) {
   const res = await fetch(apiUrl("/api/export/pdf-professional/generate"), {
     method: "POST",

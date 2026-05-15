@@ -14,6 +14,7 @@ from credits_logic import topup_approve_extend_days_default
 from credits_wallet import utc_now
 from database import get_db
 from deps import require_admin_user
+from referrals import apply_first_paid_topup_bonus_if_needed
 from transcription_loyalty import reset_all_transcription_loyalty_counters
 from models import CreditTopUpRequest, User, UserNotification
 from pricing import (
@@ -378,6 +379,12 @@ def approve_topup(
 
     db.commit()
     db.refresh(usr)
+    # Bonus parrainage à la 1ère recharge approuvée (idempotent via UniqueConstraint sur referral_events).
+    # Best-effort : un échec ici ne doit pas remonter en erreur d'approbation côté admin.
+    try:
+        apply_first_paid_topup_bonus_if_needed(db, usr)
+    except Exception:
+        db.rollback()
     return _grant_response_payload(usr, add_units=add_units, mru_nominal=mru_nominal)
 
 

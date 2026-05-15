@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from groq import APIError
 from pydantic import BaseModel, Field
@@ -17,6 +17,7 @@ from database import get_db
 from deps import require_wallet_user
 from models import User
 from pricing import billed_mru_to_wallet_units_debit, groq_billed, wallet_units_to_mru_display
+from rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +154,9 @@ class GenerateRequest(BaseModel):
 
 
 @router.post("/generate")
+@limiter.limit("30/hour")
 async def generate_lesson(
+    request: Request,
     req: GenerateRequest,
     db: Annotated[Session, Depends(get_db)],
     _auth: Annotated[Optional[User], Depends(require_wallet_user)],

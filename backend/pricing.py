@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Optional
 
 
 def _f(name: str, default: float) -> float:
@@ -243,6 +244,25 @@ def export_job_billed() -> tuple[float, float]:
     return float(u), usd_provider_to_billed_mru(u)
 
 
+# Facturation PDF WhatsApp à la page (env ``WHATSAPP_PDF_MRU_PER_PAGE``, défaut 0.5 MRU/page).
+# Diverge volontairement du web (où le PDF est forfaitaire à ~0.026 MRU). Sur WhatsApp le PDF
+# est l'output principal, donc on facture proportionnellement à la valeur produite.
+WHATSAPP_PDF_MRU_PER_PAGE = _nonneg(_f("WHATSAPP_PDF_MRU_PER_PAGE", 0.5))
+
+# /quiz interactif : forfait symbolique par session (env ``WHATSAPP_QUIZ_BILLED_MRU``).
+WHATSAPP_QUIZ_BILLED_MRU = _nonneg(_f("WHATSAPP_QUIZ_BILLED_MRU", 0.02))
+
+# Activation du partage web (`/c/<token>`) : facturé 1× au moment de la création du token
+# (env ``WHATSAPP_SHARE_BILLED_MRU``). Les livraisons suivantes du même lien sont gratuites.
+WHATSAPP_SHARE_BILLED_MRU = _nonneg(_f("WHATSAPP_SHARE_BILLED_MRU", 0.5))
+
+
+def whatsapp_pdf_pages_billed_mru(page_count: int) -> float:
+    """Retourne le MRU facturé pour un PDF WhatsApp de ``page_count`` pages."""
+    pages = max(1, int(page_count or 1))
+    return pages * WHATSAPP_PDF_MRU_PER_PAGE
+
+
 def export_premium_billed() -> tuple[float, float]:
     u = EXPORT_PREMIUM_LATEX_PROVIDER_USD
     return float(u), usd_provider_to_billed_mru(u)
@@ -274,35 +294,53 @@ def latex_conversion_billed_mru(markdown_text: str) -> tuple[float, float]:
 
 
 def estimate_max_transcribe_wallet_units(duration_seconds: float, transcription_engine: str = "openai") -> int:
-    """
-    Estime le coût total maximum d'une transcription (Audio + LLM) pour le blocage préventif.
+    """Estime le coût total maximum d'une transcription (Audio + LLM) pour le blocage préventif.
+
+    Important : on compare au **prix retail** du catalogue (palier ``nouveau`` = le pire),
+    pas au coût fournisseur × markup générique — sinon ``local`` (prix fixé à 2 MRU/h) serait
+    sur-estimé par ``LOCAL_WHISPER_USD_PER_MINUTE × MARGIN`` (≈ 6 MRU/h en représentation USD).
     """
     if duration_seconds <= 0:
         return 0
-        
-    # 1. Coût Audio
-    if "local" in (transcription_engine or "").lower():
-        audio_usd = local_whisper_provider_usd(duration_seconds)
+
+    # 1. Coût Audio — tarif retail (palier le plus cher) du catalogue.
+    eng_lower = (transcription_engine or "").lower().strip()
+    audio_hours = duration_seconds / 3600.0
+    retail_mru_per_hour: Optional[float] = None
+    try:
+        from transcription_retail_catalog import get_retail_model, max_mru_per_hour_for_model
+
+        spec = get_retail_model(eng_lower)
+        if spec is not None:
+            retail_mru_per_hour = max_mru_per_hour_for_model(spec)
+    except Exception:
+        retail_mru_per_hour = None
+
+    if retail_mru_per_hour is not None:
+        mru_audio_value = audio_hours * float(retail_mru_per_hour)
     else:
-        audio_usd = whisper_provider_usd(duration_seconds)
-        
-    mru_audio = billed_mru_to_wallet_units_debit(usd_provider_to_billed_mru(audio_usd))
-    
-    # 2. Coût LLM (Nettoyage Sémantique + Résumé)
-    # On estime environ 250 tokens in/out par minute d'audio.
+        # Fallback ancien comportement (modèle hors catalogue).
+        if "local" in eng_lower:
+            audio_usd = local_whisper_provider_usd(duration_seconds)
+        else:
+            audio_usd = whisper_provider_usd(duration_seconds)
+        mru_audio_value = usd_provider_to_billed_mru(audio_usd)
+
+    mru_audio = billed_mru_to_wallet_units_debit(mru_audio_value)
+
+    # 2. Coût LLM (Nettoyage Sémantique + Résumé) — inchangé.
     minutes = duration_seconds / 60.0
     estimated_tokens = int(minutes * 250)
-    
+
     llm_usd = openai_transcribe_chat_provider_usd(estimated_tokens, estimated_tokens)
-    
-    # Résumé profond (sujet/chapitres) : environ 1000 tokens par heure
+
     summary_tokens = max(500, int((duration_seconds / 3600.0) * 1000))
     llm_usd += groq_chat_provider_usd(summary_tokens, summary_tokens // 2)
-    
+
     mru_llm = billed_mru_to_wallet_units_debit(transcribe_aggregate_billed_mru(llm_usd))
-    
-    # 3. Marge de sécurité (+10%)
+
+    # 3. Marge de sécurité (+10%).
     total_mru = mru_audio + mru_llm
     safe_total = int(total_mru * 1.10)
-    
+
     return max(1, safe_total)
