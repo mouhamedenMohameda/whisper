@@ -39,6 +39,7 @@ from routes import (
     transcript_insight,
     transcribe,
     transcribe_jobs,
+    telegram as telegram_routes,
     whatsapp as whatsapp_routes,
 )
 from schema_migrate import (
@@ -47,6 +48,7 @@ from schema_migrate import (
     ensure_notification_schema,
     ensure_public_share_schema,
     ensure_referrals_schema,
+    ensure_telegram_source_schema,
     ensure_transcription_jobs_schema,
     ensure_user_transcription_model_hours_schema,
     ensure_whatsapp_source_schema,
@@ -95,6 +97,7 @@ async def lifespan(_: FastAPI):
     ensure_notification_schema(engine)
     ensure_public_share_schema(engine)
     ensure_whatsapp_source_schema(engine)
+    ensure_telegram_source_schema(engine)
     ensure_referrals_schema(engine)
     sync_designated_admin()
     transcribe_jobs.init_transcribe_job_slots()
@@ -153,6 +156,7 @@ app.include_router(notifications.router, prefix="/api")
 app.include_router(referrals_routes.router, prefix="/api")
 app.include_router(share.router, prefix="/api")
 app.include_router(whatsapp_routes.router, prefix="/api")
+app.include_router(telegram_routes.router, prefix="/api")
 
 
 @app.get("/")

@@ -71,6 +71,22 @@ class User(Base):
     # Langue préférée pour l'UI WhatsApp ("fr" ou "ar"). NULL = devinée via dernier job / défaut env.
     whatsapp_language: Mapped[Optional[str]] = mapped_column(String(8), nullable=True, default=None)
 
+    # === Telegram bot — miroir des préférences WhatsApp ===
+    # ID numérique du chat Telegram (1-1) où renvoyer les fiches. UNIQUE = un chat = un compte.
+    # NULL tant que l'user n'a pas complété le flow de liaison côté bot Telegram.
+    telegram_chat_id: Mapped[Optional[str]] = mapped_column(String(32), unique=True, index=True, nullable=True, default=None)
+    telegram_transcription_model: Mapped[Optional[str]] = mapped_column(String(48), nullable=True, default=None)
+    telegram_subject: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, default=None)
+    telegram_language: Mapped[Optional[str]] = mapped_column(String(8), nullable=True, default=None)
+
+    # Token de liaison Telegram — généré par l'app web pour un user authentifié, conso par le bot
+    # quand l'user clique "Start" dans Telegram. On stocke uniquement le sha256(token) pour qu'une
+    # fuite DB ne donne pas accès au token brut. Single-use : effacé dès consommation. Expiration courte (5 min).
+    telegram_link_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True, default=None)
+    telegram_link_token_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+
     transcription_model_hours: Mapped[list["UserTranscriptionModelHours"]] = relationship(
         "UserTranscriptionModelHours",
         back_populates="user",
@@ -164,12 +180,16 @@ class TranscriptionJob(Base):
     transcription_engine: Mapped[str] = mapped_column(String(24), nullable=False, server_default="openai")
     input_relpath: Mapped[str] = mapped_column(String(512), nullable=False)
     client_content_type: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
-    # Origine du job : "web" (UI standard) ou "whatsapp" (bot conversationnel — déclenche send PDF au numéro).
+    # Origine du job : "web" (UI standard), "whatsapp" ou "telegram" (bots conversationnels).
     source: Mapped[str] = mapped_column(String(24), nullable=False, server_default="web", default="web")
     # Numéro WhatsApp E.164 où renvoyer le PDF si source="whatsapp" (sinon NULL).
     whatsapp_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
     # ID du message WhatsApp entrant qui a déclenché ce job (debug, audit, dédoublonnage côté Meta).
     whatsapp_message_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    # Chat Telegram destinataire si source="telegram" (sinon NULL).
+    telegram_chat_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    # ID du message Telegram entrant ayant déclenché ce job (dédoublonnage idempotent).
+    telegram_message_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
     status: Mapped[str] = mapped_column(String(24), nullable=False, index=True, server_default="queued")
     progress_percent: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")

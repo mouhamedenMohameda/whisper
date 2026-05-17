@@ -381,6 +381,70 @@ def ensure_whatsapp_source_schema(engine: Engine) -> None:
             ))
 
 
+def ensure_telegram_source_schema(engine: Engine) -> None:
+    """Ajoute les colonnes ``telegram_*`` sur ``transcription_jobs`` et ``users`` si absentes.
+
+    Symétrique de ``ensure_whatsapp_source_schema`` — bot Telegram = miroir du bot WhatsApp.
+    Idempotent : peut tourner à chaque démarrage sans risque.
+    """
+    insp = inspect(engine)
+    dialect = engine.dialect.name
+    tables = insp.get_table_names()
+    if "transcription_jobs" not in tables:
+        return
+
+    job_cols = {c["name"] for c in insp.get_columns("transcription_jobs")}
+    with engine.begin() as conn:
+        if "telegram_chat_id" not in job_cols:
+            conn.execute(text("ALTER TABLE transcription_jobs ADD COLUMN telegram_chat_id VARCHAR(32)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_transcription_jobs_telegram_chat_id "
+                "ON transcription_jobs(telegram_chat_id)"
+            ))
+        if "telegram_message_id" not in job_cols:
+            conn.execute(text("ALTER TABLE transcription_jobs ADD COLUMN telegram_message_id VARCHAR(64)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_transcription_jobs_telegram_message_id "
+                "ON transcription_jobs(telegram_message_id)"
+            ))
+        # Idempotence : un même message_id Telegram ne doit déclencher qu'un seul job.
+        try:
+            if dialect in ("sqlite", "postgresql"):
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_transcription_jobs_telegram_message_id "
+                    "ON transcription_jobs(telegram_message_id) WHERE telegram_message_id IS NOT NULL"
+                ))
+        except Exception:
+            logger.exception("Impossible de créer l'index UNIQUE telegram_message_id — idempotence dégradée.")
+
+    if "users" in tables:
+        user_cols = {c["name"] for c in insp.get_columns("users")}
+        with engine.begin() as conn:
+            if "telegram_chat_id" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN telegram_chat_id VARCHAR(32)"))
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_telegram_chat_id "
+                    "ON users(telegram_chat_id)"
+                ))
+            if "telegram_transcription_model" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN telegram_transcription_model VARCHAR(48)"))
+            if "telegram_subject" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN telegram_subject VARCHAR(128)"))
+            if "telegram_language" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN telegram_language VARCHAR(8)"))
+            if "telegram_link_token_hash" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN telegram_link_token_hash VARCHAR(64)"))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_users_telegram_link_token_hash "
+                    "ON users(telegram_link_token_hash)"
+                ))
+            if "telegram_link_token_expires_at" not in user_cols:
+                if dialect == "postgresql":
+                    conn.execute(text("ALTER TABLE users ADD COLUMN telegram_link_token_expires_at TIMESTAMPTZ"))
+                else:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN telegram_link_token_expires_at TIMESTAMP"))
+
+
 def ensure_public_share_schema(engine: Engine) -> None:
     """Ajoute ``transcription_jobs.public_share_token`` et compteurs si absents (idempotent)."""
     insp = inspect(engine)
