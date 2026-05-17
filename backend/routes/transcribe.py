@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated, Any, AsyncIterator, Optional
 
@@ -341,6 +342,34 @@ def _ffmpeg_preprocess_to_mp3(src_path: str, duration_estimate: Optional[float])
         br,
         duration_estimate,
     )
+
+    # === Étape 2 : VAD compression (Silero) — optionnelle, désactivable via env var ===
+    # On compresse les silences > 800 ms pour réduire les hallucinations Whisper et raccourcir
+    # l'audio. Si VAD échoue ou est indisponible, on garde le mp3 ffmpeg tel quel. C'est un
+    # *enhancement* — jamais bloquant.
+    try:
+        from audio_preprocess import vad_compress, is_vad_enabled
+
+        if is_vad_enabled():
+            fd2, vad_dst = tempfile.mkstemp(suffix=".lecturai.vad.mp3")
+            os.close(fd2)
+            result = vad_compress(Path(dst), Path(vad_dst))
+            if result is not None:
+                # Succès VAD : on remplace dst, on supprime l'ancien
+                try:
+                    os.unlink(dst)
+                except OSError:
+                    pass
+                dst = str(result)
+            else:
+                # Fallback : VAD a renvoyé None (audio trop court, modèle absent, etc.)
+                try:
+                    os.unlink(vad_dst)
+                except OSError:
+                    pass
+    except Exception:
+        logger.exception("TRANSCRIBE: VAD compression a planté — fallback sur sortie ffmpeg")
+
     return dst
 
 
@@ -1897,7 +1926,46 @@ def _build_transcribe_success_payload(
     language = getattr(response, "language", None) or "unknown"
     api_text = (getattr(response, "text", None) or "").strip()
 
+    # === Nettoyage par segment : on détecte et MARQUE les segments pathologiques ===
+    # Whisper produit naturellement des segments avec des métriques par segment. Plutôt que de
+    # rejeter tout le transcript quand une partie est mauvaise, on **conserve** la structure et
+    # on remplace le texte des segments dégradés par "[inaudible MM:SS-MM:SS]". Le LLM Groq
+    # (et l'user) sauront que ces plages n'ont pas été transcrites de façon fiable.
+    _segment_cleaner_summary: Optional[dict[str, Any]] = None
+    try:
+        from asr_segment_cleaner import clean_segments, is_enabled as _segclean_enabled
+
+        if _segclean_enabled() and segments:
+            inaudible_label = "غير مسموع" if (speech_language or "").startswith("ar") else "inaudible"
+            cleaner_result = clean_segments(segments, inaudible_label=inaudible_label)
+            segments = cleaner_result["cleaned_segments"]
+            _segment_cleaner_summary = {
+                "usable_duration_sec": cleaner_result["usable_duration_sec"],
+                "inaudible_duration_sec": cleaner_result["inaudible_duration_sec"],
+                "total_duration_sec": cleaner_result["total_duration_sec"],
+                "usable_ratio": cleaner_result["usable_ratio"],
+                "inaudible_ranges": cleaner_result["inaudible_ranges"],
+                "stats": cleaner_result["stats"],
+            }
+    except Exception:
+        logger.exception("Segment cleaner a planté — segments d'origine conservés")
+
     verbatim = build_verbatim_transcript(segments, api_text)
+
+    # === Corrections regex déterministes post-Whisper ===
+    # Substitution simple {motif: remplacement} via ``backend/asr_corrections.json``.
+    # Pas de LLM, pas de boucle possible — l'user étend le JSON au fil des erreurs observées.
+    try:
+        from asr_corrections import apply_corrections, is_enabled as _asr_corr_enabled
+
+        if _asr_corr_enabled() and verbatim:
+            corrected, n_subs = apply_corrections(verbatim)
+            if n_subs > 0:
+                logger.info("ASR corrections: %d substitution(s) appliquée(s)", n_subs)
+                verbatim = corrected
+    except Exception:
+        logger.exception("ASR corrections a planté — transcript brut conservé")
+
     timestamped = build_timestamped_transcript(segments, api_text)
     if not timestamped:
         timestamped = verbatim
@@ -2000,15 +2068,33 @@ def _build_transcribe_success_payload(
     )
     billed_transcribe_total_mru = float(mru_audio) + float(mru_extras)
 
+    _asr_passages = build_asr_passages_annotated(
+        segments,
+        fallback_plain=verbatim,
+        fallback_end_sec=duration_sec,
+    )
+
+    # === Résumé de confiance Whisper : score global + passages problématiques ===
+    # Stocké dans result_json pour exposition via la commande /confiance du bot Telegram et l'app web.
+    try:
+        from asr_confidence import compute_overall as _compute_conf
+
+        _conf_threshold = float(os.getenv("TRANSCRIBE_CONFIDENCE_THRESHOLD", "90") or "90")
+    except Exception:
+        _conf_threshold = 90.0
+    try:
+        _confidence_summary = _compute_conf(_asr_passages, low_conf_threshold=_conf_threshold)
+    except Exception:
+        logger.exception("Confidence summary a planté — pas de résumé inséré")
+        _confidence_summary = None
+
     payload: dict[str, Any] = {
         "transcription_engine": transcription_engine,
         "transcript": verbatim,
         "timestamped_transcript": timestamped,
-        "asr_passages_annotated": build_asr_passages_annotated(
-            segments,
-            fallback_plain=verbatim,
-            fallback_end_sec=duration_sec,
-        ),
+        "asr_passages_annotated": _asr_passages,
+        "confidence_summary": _confidence_summary,
+        "inaudible_summary": _segment_cleaner_summary,
         "speech_language": speech_language,
         "semantic_polish_applied": semantic_polish_applied,
         "audio_preprocess_applied": audio_preprocess_applied,

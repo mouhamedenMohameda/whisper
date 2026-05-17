@@ -459,106 +459,44 @@ async def export_pdf_professional(
     db: Annotated[Session, Depends(get_db)],
     _u: Annotated[Optional[User], Depends(require_wallet_user)],
 ):
-    """Génère un PDF professionnel via LaTeX avec facturation x8 du coût réel."""
-    # 1. Vérification crédits basée sur l'estimation dynamique
+    """Génère un PDF professionnel via LaTeX avec facturation x8 du coût réel.
+
+    Pipeline LaTeX déporté dans ``pdf_premium.generate_premium_pdf_bytes`` (module partagé
+    avec le bot WhatsApp). Cette route conserve la logique HTTP + facturation + streaming.
+    """
+    from pdf_premium import (
+        generate_premium_pdf_bytes,
+        PremiumPdfError,
+        PremiumPdfUnavailable,
+    )
+
     _, billed_mru = latex_conversion_billed_mru(req.lesson)
     charged = billed_mru_to_wallet_units_debit(billed_mru)
-    
+
     if _u and _u.credit_balance < charged:
         raise HTTPException(status_code=402, detail="Crédits insuffisants pour l'export professionnel.")
 
-    # 2. Tentative de génération (avec jusqu'à 2 essais supplémentaires en cas d'échec de compilation)
     api_key = (os.getenv("GROQ_API_KEY") or "").strip()
     if not api_key:
         raise HTTPException(status_code=500, detail="Clé API manquante pour la conversion LaTeX.")
 
-    client = _groq_client(api_key)
-    model = os.getenv("GROQ_LATEX_MODEL", "llama-3.3-70b-versatile")
-    user_prompt = f"Subject: {req.subject}\nLanguage: {req.language}\n\nMARKDOWN LESSON:\n{req.lesson}"
-    
-    pdf_data = None
-    last_error = ""
-    max_attempts = 3
-
-    for attempt in range(max_attempts):
-        try:
-            # Appel IA
-            latex_code, _, _ = _groq_chat(
-                client,
-                model=model,
-                system=LATEX_PREMIUM_SYSTEM_PROMPT,
-                user=user_prompt + (f"\n\nIMPORTANT: Your previous attempt failed to compile. Please double check for unescaped special characters like &, %, $, #, _ outside of math mode." if attempt > 0 else ""),
-                max_tokens=16384,
-                temperature=0.2 + (attempt * 0.1), # Un peu plus de créativité à chaque essai
-            )
-
-            # Compilation LaTeX
-            # Nettoyage si l'IA a mis des backticks ou du texte avant/après
-            latex_code = latex_code.strip()
-            if "```" in latex_code:
-                # On essaie d'extraire ce qu'il y a entre les premiers ```latex et les derniers ```
-                match = re.search(r"```(?:latex)?\n?(.*?)\n?```", latex_code, re.DOTALL)
-                if match:
-                    latex_code = match.group(1).strip()
-                else:
-                    # Si on trouve des backticks mais pas le bloc complet, on les vire juste
-                    latex_code = re.sub(r"```[a-z]*\n?", "", latex_code)
-                    latex_code = latex_code.replace("```", "")
-
-            # Si ça commence toujours pas par \documentclass, on cherche la première occurrence
-            if "\\documentclass" in latex_code and not latex_code.startswith("\\documentclass"):
-                latex_code = latex_code[latex_code.find("\\documentclass"):]
-
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tex_file = os.path.join(tmpdir, "lesson.tex")
-                with open(tex_file, "w", encoding="utf-8") as f:
-                    f.write(latex_code)
-                
-                try:
-                    # On lance pdflatex deux fois pour la table des matières
-                    process = subprocess.run(
-                        ["pdflatex", "-interaction=nonstopmode", "-output-directory", tmpdir, tex_file],
-                        capture_output=True,
-                        text=True,
-                        timeout=60
-                    )
-                    
-                    pdf_path = os.path.join(tmpdir, "lesson.pdf")
-                    if os.path.exists(pdf_path):
-                        # On lance la deuxième passe seulement si la première a produit un PDF
-                        subprocess.run(
-                            ["pdflatex", "-interaction=nonstopmode", "-output-directory", tmpdir, tex_file],
-                            capture_output=True,
-                            text=True,
-                            timeout=60
-                        )
-                        with open(pdf_path, "rb") as f:
-                            pdf_data = f.read()
-                        break # Succès ! On sort de la boucle
-                    else:
-                        last_error = f"Compilation attempt {attempt + 1} failed: {process.stdout[:500]}"
-                        logger.warning(f"LaTeX Attempt {attempt + 1} failed. Output: {process.stdout[:200]}")
-                except FileNotFoundError:
-                    raise HTTPException(
-                        status_code=501, 
-                        detail="Le moteur de rendu LaTeX (pdflatex) n'est pas installé sur ce serveur."
-                    )
-        except Exception as e:
-            last_error = str(e)
-            logger.warning(f"LaTeX Generation Attempt {attempt + 1} failed with error: {e}")
-
-    if not pdf_data:
-        raise HTTPException(
-            status_code=502, 
-            detail=f"Échec de la génération après {max_attempts} tentatives. Erreur: {last_error}"
+    try:
+        pdf_data, _page_count, _latex = await asyncio.to_thread(
+            generate_premium_pdf_bytes,
+            lesson_markdown=req.lesson,
+            subject=req.subject,
+            language=req.language,
+            api_key=api_key,
         )
+    except PremiumPdfUnavailable as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from None
+    except PremiumPdfError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
 
-    # 3. Débit crédits (Seulement si succès)
     if charged > 0:
         debit_credits(db, _u, charged)
 
     buffer = io.BytesIO(pdf_data)
-
     safe_name = re.sub(r"[^\w\-]", "_", req.filename)
     return StreamingResponse(
         buffer,
